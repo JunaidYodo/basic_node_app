@@ -19,20 +19,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: nexthireadmin
-          POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD_DEV }}
-          POSTGRES_DB: nexthiredb
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
 
     steps:
     - name: Checkout code
@@ -60,7 +46,7 @@ jobs:
 
     - name: Setup dev environment variables
       run: |
-        echo "DATABASE_URL=postgresql://nexthireadmin:${{ secrets.DB_PASSWORD_DEV }}@localhost:5432/nexthiredb" >> $GITHUB_ENV
+        echo "DATABASE_URL=postgresql://nexthireadmin:${{ secrets.DB_PASSWORD_DEV }}@{{secrets.DB_HOST_DEV}}:5432/nexthiredb" >> $GITHUB_ENV
         echo "NODE_ENV=dev" >> $GITHUB_ENV
         echo "PORT=3001" >> $GITHUB_ENV
 
