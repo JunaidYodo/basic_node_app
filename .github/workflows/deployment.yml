@@ -51,16 +51,20 @@ jobs:
         echo "NODE_ENV=dev" >> $GITHUB_ENV
         echo "PORT=3001" >> $GITHUB_ENV
 
-    - name: Wait for PostgreSQL to be ready
+    - name: Wait for PostgreSQL
       run: |
         for i in $(seq 1 30); do
-          if pg_isready --host="${{ secrets.DB_HOST_DEV }}" --port=5432 --username="nexthireadmin"; then
+          pg_isready --host="$DB_HOST" --port=5432 --username="$DB_USER"
+          if [ $? -eq 0 ]; then
             echo "PostgreSQL is ready"
             break
           fi
           echo "Waiting for PostgreSQL... ($i/30)"
           sleep 2
         done
+      env:
+        DB_HOST: ${{ secrets.DB_HOST_DEV }}
+        DB_USER: nexthireadmin
 
     - name: Run database migrations for tests
       env:
