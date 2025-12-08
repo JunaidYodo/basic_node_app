@@ -1,0 +1,27 @@
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 10:46:37"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 10:46:37"}
+{"level":"info","message":"Received SIGINT, shutting down gracefully...","timestamp":"2025-11-25 10:47:24"}
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 10:59:20"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 10:59:20"}
+{"level":"info","message":"Received SIGINT, shutting down gracefully...","timestamp":"2025-11-25 11:01:54"}
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 11:02:07"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:02:08"}
+{"level":"info","message":"Received SIGINT, shutting down gracefully...","timestamp":"2025-11-25 11:02:25"}
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 11:04:17"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:04:17"}
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 11:04:56"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:04:56"}
+{"level":"info","message":"Received SIGINT, shutting down gracefully...","timestamp":"2025-11-25 11:08:12"}
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 11:08:18"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:08:18"}
+{"level":"info","message":"Received SIGINT, shutting down gracefully...","timestamp":"2025-11-25 11:13:12"}
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 11:13:21"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:13:21"}
+{"level":"info","message":"Received SIGINT, shutting down gracefully...","timestamp":"2025-11-25 11:17:33"}
+{"level":"info","message":"Server is listening at port 3000","timestamp":"2025-11-25 11:21:46"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:21:46"}
+{"level":"info","message":"Received SIGINT, shutting down gracefully...","timestamp":"2025-11-25 11:22:24"}
+{"level":"info","message":"Server is listening at port 4000","timestamp":"2025-11-25 11:22:31"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:22:31"}
+{"level":"info","message":"Server is listening at port 4000","timestamp":"2025-11-25 11:23:22"}
+{"level":"info","message":"Environment: development","timestamp":"2025-11-25 11:23:22"}

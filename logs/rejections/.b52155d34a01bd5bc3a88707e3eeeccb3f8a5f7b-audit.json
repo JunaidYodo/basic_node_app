@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "D:\\YODO Projects\\node-base-app\\logs\\rejections\\.b52155d34a01bd5bc3a88707e3eeeccb3f8a5f7b-audit.json",
+    "files": [
+        {
+            "date": 1764051683304,
+            "name": "D:\\YODO Projects\\node-base-app\\logs\\rejections\\rejections-2025-11-25.log",
+            "hash": "a02f654e72c649ba65983c3a217402125baa679b9d6e6e264be8e4c27c0c9ea9"
+        }
+    ],
+    "hashType": "sha256"
+}

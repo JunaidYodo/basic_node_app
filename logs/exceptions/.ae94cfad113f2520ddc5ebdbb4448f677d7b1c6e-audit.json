@@ -1,0 +1,20 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "D:\\YODO Projects\\node-base-app\\node-base-app\\logs\\exceptions\\.ae94cfad113f2520ddc5ebdbb4448f677d7b1c6e-audit.json",
+    "files": [
+        {
+            "date": 1763991497322,
+            "name": "D:\\YODO Projects\\node-base-app\\node-base-app\\logs\\exceptions\\exceptions-2025-11-24.log",
+            "hash": "9b32b687ff2503d9ba4ff589eaa151ee0fd489785f708a9b29aa0ba0012de654"
+        },
+        {
+            "date": 1764049592487,
+            "name": "D:\\YODO Projects\\node-base-app\\node-base-app\\logs\\exceptions\\exceptions-2025-11-25.log",
+            "hash": "969527daf5c215a43c09ee6bab32981763301126d726712026b446276bba7b63"
+        }
+    ],
+    "hashType": "sha256"
+}
