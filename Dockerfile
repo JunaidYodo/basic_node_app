@@ -8,8 +8,10 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm ci
+# Install all dependencies (including dev deps for prisma generate)
+RUN npm ci --include=dev
 
+# Generate Prisma client (requires @prisma/client which is now installed)
 RUN npx prisma generate
 
 # =============================================
@@ -19,12 +21,18 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/prisma ./prisma
+# Copy package files
+COPY package*.json ./
 
-COPY . .
-
+# Install production dependencies only
 RUN npm ci --only=production
+
+# Copy generated Prisma client from deps stage
+COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
+COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma/
+
+# Copy source code
+COPY . .
 
 # =============================================
 # Stage 3: Production Image
@@ -49,10 +57,14 @@ WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
+# Copy only production dependencies from builder stage
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
-COPY --chown=nodejs:nodejs package*.json ./
-COPY --chown=nodejs:nodejs . .
+
+# Copy Prisma schema (optional, for migrations at runtime)
+COPY --from=deps --chown=nodejs:nodejs /app/prisma ./prisma
+
+# Copy application code from builder stage
+COPY --from=builder --chown=nodejs:nodejs /app ./
 
 USER nodejs
 
