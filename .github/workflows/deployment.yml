@@ -51,15 +51,14 @@ jobs:
         echo "NODE_ENV=dev" >> $GITHUB_ENV
         echo "PORT=3001" >> $GITHUB_ENV
 
-    - name: Wait for PostgreSQL
+    - name: Wait for PostgreSQL to be ready
       run: |
         for i in $(seq 1 30); do
-          echo "Checking PostgreSQL ($i/30)..."
-          pg_isready --host="next-hire-db-dev.cluster-cxk440ioa00s.us-east-2.rds.amazonaws.com" --port="5432" --username="nexthiredb"
-          if [ $? -eq 0 ]; then
+          if pg_isready --host="next-hire-db-dev.cluster-cxk440ioa00s.us-east-2.rds.amazonaws.com" --port=5432 --username="nexthireadmin"; then
             echo "PostgreSQL is ready"
             break
           fi
+          echo "Waiting for PostgreSQL... ($i/30)"
           sleep 2
         done
 
