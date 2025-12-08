@@ -2,7 +2,7 @@ name: Deploy Next Hire Node APP
 
 on:
   push:
-    branches: [ main ]
+    branches: [ dev ]
   workflow_dispatch:
 
 env:
