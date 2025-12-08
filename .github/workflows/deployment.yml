@@ -275,16 +275,69 @@ jobs:
         echo "New task definition registered: $NEW_TASK_INFO"
         echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
 
-    - name: Run database migrations
+    - name: Run database migrations via SSM Session
       env:
         DATABASE_URL: ${{ env.DATABASE_URL }}
+        IMAGE_TAG: ${{ needs.build-and-push.outputs.image-tag }}
       run: |
-        echo "Running database migrations..."
-        # Create a temporary container to run migrations
-        docker run --rm \
-          -e DATABASE_URL="$DATABASE_URL" \
-          ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image-tag }} \
-          npx prisma migrate deploy
+        echo "Running database migrations via SSM..."
+        
+        # Find an ECS task that's running
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster next-hire-cluster-dev \
+          --service next-hire-app-dev \
+          --query 'taskArns[0]' \
+          --output text)
+        
+        if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
+          echo "No running tasks found. Starting a new task for migrations..."
+          
+          # Start a one-off task for migrations
+          TASK_ARN=$(aws ecs run-task \
+            --cluster next-hire-cluster-dev \
+            --task-definition next-hire-app-dev \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_DEV }}],securityGroups=[${{ secrets.SECURITY_GROUP_IDS_DEV }}],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"next-hire","command":["npx","prisma","migrate","deploy"],"environment":[{"name":"DATABASE_URL","value":"'"$DATABASE_URL"'"}]}]}' \
+            --query 'tasks[0].taskArn' \
+            --output text)
+          
+          # Wait for task to complete
+          echo "Waiting for migration task to complete..."
+          aws ecs wait tasks-stopped \
+            --cluster next-hire-cluster-dev \
+            --tasks $TASK_ARN
+            
+          # Check exit code
+          TASK_STATUS=$(aws ecs describe-tasks \
+            --cluster next-hire-cluster-dev \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+          
+          if [ "$TASK_STATUS" != "0" ]; then
+            echo "Migration task failed with exit code: $TASK_STATUS"
+            exit 1
+          fi
+          
+          echo "Migrations completed via one-off ECS task"
+        else
+          echo "Found running task: $TASK_ARN"
+          echo "Running migrations via exec command..."
+          
+          # Get the task ID
+          TASK_ID=$(echo $TASK_ARN | cut -d'/' -f3)
+          
+          # Run migrations via ECS exec
+          aws ecs execute-command \
+            --cluster next-hire-cluster-dev \
+            --task $TASK_ID \
+            --container next-hire \
+            --interactive \
+            --command "npx prisma migrate deploy"
+          
+          echo "Migrations completed via ECS exec"
+        fi
 
     - name: Deploy to Development
       run: |
@@ -329,6 +382,7 @@ jobs:
         
         echo "Health check failed after $MAX_RETRIES attempts"
         exit 1
+
 
   deploy-to-staging:
     needs: [build-and-push, deploy-to-dev]
