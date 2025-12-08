@@ -51,22 +51,22 @@ jobs:
         echo "NODE_ENV=dev" >> $GITHUB_ENV
         echo "PORT=3001" >> $GITHUB_ENV
 
-    - name: Wait for PostgreSQL to be ready
-      run: |
-        for i in $(seq 1 30); do
-          if pg_isready --host="next-hire-db-dev.cluster-cxk440ioa00s.us-east-2.rds.amazonaws.com" --port=5432 --username="nexthireadmin"; then
-            echo "PostgreSQL is ready"
-            break
-          fi
-          echo "Waiting for PostgreSQL... ($i/30)"
-          sleep 2
-        done
+    # - name: Wait for PostgreSQL to be ready
+    #   run: |
+    #     for i in $(seq 1 30); do
+    #       if pg_isready --host="next-hire-db-dev.cluster-cxk440ioa00s.us-east-2.rds.amazonaws.com" --port=5432 --username="nexthireadmin"; then
+    #         echo "PostgreSQL is ready"
+    #         break
+    #       fi
+    #       echo "Waiting for PostgreSQL... ($i/30)"
+    #       sleep 2
+    #     done
 
-    - name: Run database migrations for tests
-      env:
-        DATABASE_URL: ${{ env.DATABASE_URL }}
-      run: |
-        npx prisma migrate deploy
+    # - name: Run database migrations for tests
+    #   env:
+    #     DATABASE_URL: ${{ env.DATABASE_URL }}
+    #   run: |
+    #     npx prisma migrate deploy
 
     - name: Run ESLint
       run: |
