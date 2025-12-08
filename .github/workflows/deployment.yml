@@ -54,7 +54,7 @@ jobs:
     - name: Wait for PostgreSQL to be ready
       run: |
         for i in {1..30}; do
-          if pg_isready -h localhost -p 5432 -U nexthireadmin; then
+          if pg_isready -h ${{secrets.DB_HOST_DEV}} -p 5432 -U nexthireadmin; then
             echo "PostgreSQL is ready"
             break
           fi
