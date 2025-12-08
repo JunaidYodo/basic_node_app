@@ -5,24 +5,24 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-COPY package*.json ./
+# Copy ONLY package.json first to leverage Docker cache
+COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
-# Install all dependencies (including dev deps for prisma generate)
+RUN npm install prisma@7.1.0 @prisma/client@7.1.0 --no-save
 RUN npm ci --include=dev
 
-# Generate Prisma client (requires @prisma/client which is now installed)
 RUN npx prisma generate
 
 # =============================================
-# Stage 2: Builder (with dev deps for build if needed)
+# Stage 2: Production Dependencies
 # =============================================
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json* ./
 
 # Install production dependencies only
 RUN npm ci --only=production
@@ -31,7 +31,7 @@ RUN npm ci --only=production
 COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
 COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma/
 
-# Copy source code
+# Copy application code
 COPY . .
 
 # =============================================
@@ -57,13 +57,13 @@ WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy only production dependencies from builder stage
+# Copy production dependencies
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 
-# Copy Prisma schema (optional, for migrations at runtime)
+# Copy Prisma schema
 COPY --from=deps --chown=nodejs:nodejs /app/prisma ./prisma
 
-# Copy application code from builder stage
+# Copy application code
 COPY --from=builder --chown=nodejs:nodejs /app ./
 
 USER nodejs
