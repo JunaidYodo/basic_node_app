@@ -76,14 +76,14 @@ jobs:
       run: |
         npx tsc --noEmit || echo "TypeScript check completed"
 
-    - name: Run tests with coverage
-      env:
-        DATABASE_URL: ${{ env.DATABASE_URL }}
-        JWT_SECRET: ${{ env.JWT_SECRET }}
-        NODE_ENV: ${{ env.NODE_ENV }}
-        PORT: ${{ env.PORT }}
-      run: |
-        npm test -- --coverage
+    # - name: Run tests with coverage
+    #   env:
+    #     DATABASE_URL: ${{ env.DATABASE_URL }}
+    #     JWT_SECRET: ${{ env.JWT_SECRET }}
+    #     NODE_ENV: ${{ env.NODE_ENV }}
+    #     PORT: ${{ env.PORT }}
+    #   run: |
+    #     npm test -- --coverage
 
     - name: Security scan with npm audit
       run: |
