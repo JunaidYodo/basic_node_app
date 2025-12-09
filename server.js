@@ -8,8 +8,8 @@ import express from 'express';
 import helmet from 'helmet';
 import responseTime from 'response-time';
 
-import { PORT, CORS_ORIGIN } from './config.js';
-import { logger } from './configs.js';
+import { PORT, CORS_ORIGIN } from './config';
+import { logger } from './configs/logger.configs.js';
 import {
 	errorMiddleware,
 	morganMiddleware,
