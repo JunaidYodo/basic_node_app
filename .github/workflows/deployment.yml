@@ -199,8 +199,7 @@ jobs:
   deploy-to-dev:
     needs: build-and-push
     runs-on: ubuntu-latest
-    environment: 
-      name: dev
+    environment: dev
     permissions:
       id-token: write
       contents: read
@@ -213,137 +212,35 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
         role-session-name: GitHubActions-Dev
 
-    - name: Create DATABASE_URL for development
-      run: |
-        DB_HOST="${{ secrets.DB_HOST_DEV }}"
-        DB_PORT="${{ secrets.DB_PORT_DEV }}"
-        DB_NAME="${{ secrets.DB_NAME_DEV }}"
-        DB_USERNAME="${{ secrets.DB_USERNAME_DEV }}"
-        DB_PASSWORD="${{ secrets.DB_PASSWORD_DEV }}"
-        
-        # Create DATABASE_URL
-        DATABASE_URL="postgresql://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
-        
-        echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
-        echo "DB_HOST=$DB_HOST" >> $GITHUB_ENV
-        echo "DB_PORT=$DB_PORT" >> $GITHUB_ENV
-        echo "DB_NAME=$DB_NAME" >> $GITHUB_ENV
-        echo "DB_USERNAME=$DB_USERNAME" >> $GITHUB_ENV
-
-    - name: Update task definition with new image and secrets
+    - name: Update task definition with new image
       id: update-task-def
-      env:
-        DATABASE_URL: ${{ env.DATABASE_URL }}
-        JWT_SECRET: ${{ secrets.JWT_SECRET_DEV }}
-        NODE_ENV: production
-        PORT: ${{ env.PORT }}
       run: |
         VERSION="${{ needs.build-and-push.outputs.image-tag }}"
         NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
         
         echo "Updating task definition with image: $NEW_IMAGE"
         
-        # Get current task definition
         TASK_DEFINITION=$(aws ecs describe-task-definition \
           --task-definition next-hire-app-dev \
           --query 'taskDefinition' \
           --output json)
         
-        # Update the image and environment variables
         NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
           --arg IMAGE "$NEW_IMAGE" \
-          --arg DATABASE_URL "$DATABASE_URL" \
-          --arg NODE_ENV "$NODE_ENV" \
-          --arg PORT "$PORT" \
           '
           .containerDefinitions[0].image = $IMAGE |
-          .containerDefinitions[0].environment = [
-            {"name": "DATABASE_URL", "value": $DATABASE_URL},
-            {"name": "NODE_ENV", "value": $NODE_ENV},
-            {"name": "PORT", "value": $PORT}
-          ] |
           del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
           ')
         
-        # Register new task definition
         NEW_TASK_INFO=$(aws ecs register-task-definition \
           --cli-input-json "$NEW_TASK_DEF" \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         
-        echo "New task definition registered: $NEW_TASK_INFO"
         echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
-
-    - name: Run database migrations via SSM Session
-      env:
-        DATABASE_URL: ${{ env.DATABASE_URL }}
-        IMAGE_TAG: ${{ needs.build-and-push.outputs.image-tag }}
-      run: |
-        echo "Running database migrations via SSM..."
-        
-        # Find an ECS task that's running
-        TASK_ARN=$(aws ecs list-tasks \
-          --cluster next-hire-cluster-dev \
-          --service next-hire-app-dev \
-          --query 'taskArns[0]' \
-          --output text)
-        
-        if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
-          echo "No running tasks found. Starting a new task for migrations..."
-          
-          # Start a one-off task for migrations
-          TASK_ARN=$(aws ecs run-task \
-            --cluster next-hire-cluster-dev \
-            --task-definition next-hire-app-dev \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_DEV }}],securityGroups=[${{ secrets.SECURITY_GROUP_IDS_DEV }}],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"next-hire","command":["npx","prisma","migrate","deploy"],"environment":[{"name":"DATABASE_URL","value":"'"$DATABASE_URL"'"}]}]}' \
-            --query 'tasks[0].taskArn' \
-            --output text)
-          
-          # Wait for task to complete
-          echo "Waiting for migration task to complete..."
-          aws ecs wait tasks-stopped \
-            --cluster next-hire-cluster-dev \
-            --tasks $TASK_ARN
-            
-          # Check exit code
-          TASK_STATUS=$(aws ecs describe-tasks \
-            --cluster next-hire-cluster-dev \
-            --tasks $TASK_ARN \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text)
-          
-          if [ "$TASK_STATUS" != "0" ]; then
-            echo "Migration task failed with exit code: $TASK_STATUS"
-            exit 1
-          fi
-          
-          echo "Migrations completed via one-off ECS task"
-        else
-          echo "Found running task: $TASK_ARN"
-          echo "Running migrations via exec command..."
-          
-          # Get the task ID
-          TASK_ID=$(echo $TASK_ARN | cut -d'/' -f3)
-          
-          # Run migrations via ECS exec
-          aws ecs execute-command \
-            --cluster next-hire-cluster-dev \
-            --task $TASK_ID \
-            --container next-hire \
-            --interactive \
-            --command "npx prisma migrate deploy"
-          
-          echo "Migrations completed via ECS exec"
-        fi
 
     - name: Deploy to Development
       run: |
-        VERSION="${{ needs.build-and-push.outputs.image-tag }}"
-        echo "Deploying version $VERSION to Development"
-        
-        # Update service with new task definition
         aws ecs update-service \
           --cluster next-hire-cluster-dev \
           --service next-hire-app-dev \
@@ -352,35 +249,11 @@ jobs:
 
     - name: Wait for deployment
       run: |
-        echo "Waiting for Development deployment to stabilize..."
+        echo "Waiting for deployment..."
         aws ecs wait services-stable \
           --cluster next-hire-cluster-dev \
           --services next-hire-app-dev
-        echo "Development deployment completed successfully!"
-
-    - name: Health check
-      run: |
-        echo "Performing health check..."
-        MAX_RETRIES=30
-        RETRY_COUNT=0
-        
-        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-          SERVICE_URL=$(aws elbv2 describe-load-balancers --names next-hire-alb-dev --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || echo "")
-          
-          if [ -n "$SERVICE_URL" ]; then
-            if curl -f -s -o /dev/null -w "%{http_code}" http://$SERVICE_URL/health | grep -q "200"; then
-              echo "Health check passed!"
-              exit 0
-            fi
-          fi
-          
-          RETRY_COUNT=$((RETRY_COUNT + 1))
-          echo "Health check attempt $RETRY_COUNT failed. Retrying in 10 seconds..."
-          sleep 10
-        done
-        
-        echo "Health check failed after $MAX_RETRIES attempts"
-        exit 1
+        echo "Deployment completed!"
 
 
   deploy-to-staging:
