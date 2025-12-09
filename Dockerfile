@@ -5,13 +5,18 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-# Copy ONLY package.json first to leverage Docker cache
-COPY package.json package-lock.json* ./
+# Copy package files
+COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-RUN npm install prisma@7.1.0 @prisma/client@7.1.0 --no-save
+# Install ALL dependencies including devDependencies
+# DO NOT use --no-save installs before this!
 RUN npm ci --include=dev
 
+# Debug: Verify prisma packages are installed
+RUN npm list prisma @prisma/client
+
+# Generate Prisma client
 RUN npx prisma generate
 
 # =============================================
@@ -22,7 +27,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 
 # Install production dependencies only
 RUN npm ci --only=production
