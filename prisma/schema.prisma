@@ -5,6 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -40,7 +41,6 @@ model Permission {
   updatedAt   DateTime @updatedAt
 }
 
-// You can remove this enum if not being used
 enum RoleType {
   USER
   ADMIN

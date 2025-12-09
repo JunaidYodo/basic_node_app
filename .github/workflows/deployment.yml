@@ -42,7 +42,6 @@ jobs:
     - name: Install dependencies
       run: |
         npm ci
-        npm install prisma@7.1.0 @prisma/client@7.1.0
         npx prisma generate
 
     - name: Setup dev environment variables
