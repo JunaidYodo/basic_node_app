@@ -16,7 +16,10 @@
 		"lint": "eslint .",
 		"prettier": "prettier --write \"**/*.{js,json,css,md}\"",
 		"format": "prettier --check .",
-		"ci-check": "npm run lint && npm run format"
+		"ci-check": "npm run lint && npm run format",
+		"prisma:generate": "prisma generate",
+		"prisma:migrate": "prisma migrate dev",
+		"prisma:deploy": "prisma migrate deploy"
 	},
 	"husky": {
 		"hooks": {
@@ -47,9 +50,11 @@
 		"lint-staged": "^15.0.2",
 		"nodemon": "^3.0.1",
 		"prettier": "^3.0.3",
-		"prettier-plugin-organize-imports": "^3.2.3"
+		"prettier-plugin-organize-imports": "^3.2.3",
+		"prisma": "^7.1.0"
 	},
 	"dependencies": {
+		"@prisma/client": "^7.1.0",
 		"bcrypt": "^5.1.1",
 		"compression": "^1.7.4",
 		"cors": "^2.8.5",
