@@ -5,6 +5,14 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
+# Install system dependencies (needed for Prisma & bcrypt)
+RUN apk update && apk add --no-cache \
+    libc6-compat \
+    openssl \
+    python3 \
+    make \
+    g++
+
 # Copy package files
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
@@ -12,10 +20,10 @@ COPY prisma ./prisma/
 # Install ALL dependencies including devDependencies
 RUN npm ci --include=dev
 
-# SET DUMMY DATABASE_URL for prisma generate (schema validation only)
+# SET DUMMY DATABASE_URL for prisma generate
 ENV DATABASE_URL="postgresql://dummy:dummy@dummy:5432/dummy?schema=public"
 
-# Generate Prisma client (works with dummy URL)
+# Generate Prisma client
 RUN npx prisma generate
 
 # =============================================
@@ -42,23 +50,25 @@ ARG BUILD_VERSION="1.0.0"
 ARG BUILD_DATE
 ARG COMMIT_SHA
 
-# RUNTIME environment variables (set by ECS/Container)
-# DATABASE_URL will be provided by ECS task definition
 ENV NODE_ENV=production
 ENV PORT=3000
 
 WORKDIR /app
 
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+# Install curl for health check
+RUN apk update && apk add --no-cache curl
 
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --from=deps --chown=nodejs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nodejs:nodejs /app ./
+# Create required directories as root
+RUN mkdir -p temp_uploads public
+
+# Copy files (as root by default)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=deps /app/prisma ./prisma
+COPY --from=builder /app ./
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-CMD node -e "require('child_process').execSync('npx prisma migrate deploy --skip-generate', {stdio: 'inherit'})" || exit 1
-
-USER nodejs
+    CMD curl -f http://localhost:3000/health || exit 1
 
 EXPOSE 3000
+
 CMD ["node", "--experimental-loader=extensionless", "server.js"]
