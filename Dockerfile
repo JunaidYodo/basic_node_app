@@ -56,10 +56,9 @@ COPY --from=deps --chown=nodejs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nodejs:nodejs /app ./
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-CMD ["node", "--experimental-loader=extensionless", "server.js"] \
 CMD node -e "require('child_process').execSync('npx prisma migrate deploy --skip-generate', {stdio: 'inherit'})" || exit 1
 
 USER nodejs
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "--experimental-loader=extensionless", "server.js"]
