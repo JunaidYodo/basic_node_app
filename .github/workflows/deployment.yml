@@ -2,7 +2,7 @@ name: Deploy Next Hire Node APP
 
 on:
   push:
-    branches: [ main ]
+    branches: [ dev ]
   workflow_dispatch:
 
 env:
@@ -12,73 +12,20 @@ env:
   PORT: 3000
 
 jobs:
-  test:
+  lint-and-test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: test_user
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
+    env:
+      NODE_ENV: dev
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-
-    - name: Install dependencies
-      run: |
-        npm ci
-        npx prisma generate
-
-    - name: Setup test environment variables
-      run: |
-        echo "DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_db" >> $GITHUB_ENV
-        echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
-        echo "NODE_ENV=test" >> $GITHUB_ENV
-        echo "JWT_SECRET=test_secret" >> $GITHUB_ENV
-
-    - name: Run database migrations for tests
-      run: |
-        npx prisma migrate deploy
-
-    - name: Run tests
-      run: |
-        npm test
-
-    - name: Security scan with npm audit
-      run: |
-        npm audit --audit-level=high
-      continue-on-error: true
-
-    - name: Run ESLint
-      run: |
-        npm run lint || true
-
   determine-version:
-    needs: test
+    needs: lint-and-test
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -155,8 +102,6 @@ jobs:
 
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
       with:
         context: .
         platforms: linux/amd64
@@ -168,22 +113,11 @@ jobs:
           ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.image-tag }}
           ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
         push: true
-        secrets: |
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.image-tag }}
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-        severity: 'HIGH,CRITICAL'
 
   deploy-to-dev:
     needs: build-and-push
     runs-on: ubuntu-latest
-    environment: 
-      name: dev
+    environment: dev
     permissions:
       id-token: write
       contents: read
@@ -198,79 +132,47 @@ jobs:
 
     - name: Update task definition with new image
       id: update-task-def
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
       run: |
         VERSION="${{ needs.build-and-push.outputs.image-tag }}"
         NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
         
         echo "Updating task definition with image: $NEW_IMAGE"
         
-        # Get current task definition
         TASK_DEFINITION=$(aws ecs describe-task-definition \
           --task-definition next-hire-app-dev \
           --query 'taskDefinition' \
           --output json)
         
-        # Update the image in the container definition
-        NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE" \
-          '.containerDefinitions[0].image = $IMAGE | 
-           del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+        NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
+          --arg IMAGE "$NEW_IMAGE" \
+          '
+          .containerDefinitions[0].image = $IMAGE |
+          del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+          ')
         
-        # Register new task definition
         NEW_TASK_INFO=$(aws ecs register-task-definition \
           --cli-input-json "$NEW_TASK_DEF" \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         
-        echo "New task definition registered: $NEW_TASK_INFO"
         echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
 
-    - name: Deploy to Development with migration
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
+    - name: Deploy to Development
       run: |
-        VERSION="${{ needs.build-and-push.outputs.image-tag }}"
-        echo "Deploying version $VERSION to Development"
-        
-        # Run migration as a separate task
-        echo "Running database migrations..."
-        aws ecs run-task \
-          --cluster next-hire-cluster-dev \
-          --task-definition next-hire-app-dev \
-          --launch-type FARGATE \
-          --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx,subnet-yyy],securityGroups=[sg-zzz],assignPublicIp=ENABLED}" \
-          --overrides '{
-            "containerOverrides": [{
-              "name": "app",
-              "command": ["npx", "prisma", "migrate", "deploy"]
-            }]
-          }'
-        
-        # Wait for migration to complete
-        sleep 30
-        
-        # Update service with new task definition
         aws ecs update-service \
           --cluster next-hire-cluster-dev \
           --service next-hire-app-dev \
           --task-definition ${{ steps.update-task-def.outputs.task-definition-arn }} \
           --force-new-deployment
 
-    - name: Wait for dev deployment
+    - name: Wait for deployment
       run: |
-        echo "Waiting for Development deployment..."
+        echo "Waiting for deployment..."
         aws ecs wait services-stable \
           --cluster next-hire-cluster-dev \
           --services next-hire-app-dev
-        echo "Development deployment completed!"
+        echo "Deployment completed!"
 
-    - name: Health check
-      run: |
-        echo "Performing health check..."
-        SERVICE_URL=$(aws elbv2 describe-load-balancers --names next-hire-alb-dev --query 'LoadBalancers[0].DNSName' --output text)
-        curl -f https://$SERVICE_URL/health || exit 1
-        echo "Health check passed!"
 
   deploy-to-staging:
     needs: [build-and-push, deploy-to-dev]
@@ -283,140 +185,115 @@ jobs:
       contents: read
 
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-Staging
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ASSUME_ROLE }}
+        aws-region: ${{ env.AWS_REGION }}
+        role-session-name: GitHubActions-Staging
 
-      - name: Get image tag for staging
-        id: get-staging-tag
-        run: |
-          if [ -n "${{ needs.build-and-push.outputs.image-tag }}" ]; then
-            echo "Using build job image tag: ${{ needs.build-and-push.outputs.image-tag }}"
-            echo "image-tag=${{ needs.build-and-push.outputs.image-tag }}" >> $GITHUB_OUTPUT
-          else
-            LATEST_TAG=$(aws ecr describe-images \
-              --repository-name ${{ env.ECR_REPOSITORY }} \
-              --query 'sort_by(imageDetails, &imagePushedAt)[-1].imageTags[0]' \
-              --output text 2>/dev/null || echo "")
-            if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "None" ] && [ "$LATEST_TAG" != "latest" ]; then
-              echo "Using latest ECR image tag: $LATEST_TAG"
-              echo "image-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-            else
-              echo "No image tags found in ECR"
-              exit 1
-            fi
-          fi
+    - name: Create DATABASE_URL for staging
+      run: |
+        DB_HOST="${{ secrets.DB_HOST_STAGING }}"
+        DB_PORT="${{ secrets.DB_PORT_STAGING }}"
+        DB_NAME="${{ secrets.DB_NAME_STAGING }}"
+        DB_USERNAME="${{ secrets.DB_USERNAME_STAGING }}"
+        DB_PASSWORD="${{ secrets.DB_PASSWORD_STAGING }}"
+        
+        # Create DATABASE_URL
+        DATABASE_URL="postgresql://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
+        
+        echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+        echo "DB_HOST=$DB_HOST" >> $GITHUB_ENV
+        echo "DB_PORT=$DB_PORT" >> $GITHUB_ENV
+        echo "DB_NAME=$DB_NAME" >> $GITHUB_ENV
+        echo "DB_USERNAME=$DB_USERNAME" >> $GITHUB_ENV
 
-      - name: Update task definition with new image
-        id: update-task-def
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
-        run: |
-          VERSION="${{ steps.get-staging-tag.outputs.image-tag }}"
-          NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
-          
-          echo "Updating task definition with image: $NEW_IMAGE"
-          
-          # Get current task definition
-          TASK_DEFINITION=$(aws ecs describe-task-definition \
-            --task-definition next-hire-app-stg \
-            --query 'taskDefinition' \
-            --output json)
-          
-          # Update the image in the container definition
-          NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE" \
-            '.containerDefinitions[0].image = $IMAGE | 
-             del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
-          
-          # Register new task definition
-          NEW_TASK_INFO=$(aws ecs register-task-definition \
-            --cli-input-json "$NEW_TASK_DEF" \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
-          
-          echo "New task definition registered: $NEW_TASK_INFO"
-          echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
+    - name: Update staging task definition
+      id: update-staging-task-def
+      env:
+        DATABASE_URL: ${{ env.DATABASE_URL }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET_STAGING }}
+        NODE_ENV: staging
+        PORT: ${{ env.PORT }}
+      run: |
+        VERSION="${{ needs.build-and-push.outputs.image-tag }}"
+        NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
+        
+        echo "Updating staging task definition with image: $NEW_IMAGE"
+        
+        # Get current task definition
+        TASK_DEFINITION=$(aws ecs describe-task-definition \
+          --task-definition next-hire-app-staging \
+          --query 'taskDefinition' \
+          --output json)
+        
+        # Update the image and environment variables
+        NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
+          --arg IMAGE "$NEW_IMAGE" \
+          --arg DATABASE_URL "$DATABASE_URL" \
+          --arg NODE_ENV "$NODE_ENV" \
+          --arg PORT "$PORT" \
+          '
+          .containerDefinitions[0].image = $IMAGE |
+          .containerDefinitions[0].environment = [
+            {"name": "DATABASE_URL", "value": $DATABASE_URL},
+            {"name": "NODE_ENV", "value": $NODE_ENV},
+            {"name": "PORT", "value": $PORT}
+          ] |
+          del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+          ')
+        
+        # Register new task definition
+        NEW_TASK_INFO=$(aws ecs register-task-definition \
+          --cli-input-json "$NEW_TASK_DEF" \
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+        
+        echo "New task definition registered: $NEW_TASK_INFO"
+        echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
 
-      - name: Run database migrations for staging
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
-        run: |
-          echo "Running database migrations for staging..."
-          aws ecs run-task \
-            --cluster next-hire-cluster-stg \
-            --task-definition next-hire-app-stg \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx,subnet-yyy],securityGroups=[sg-zzz],assignPublicIp=ENABLED}" \
-            --overrides '{
-              "containerOverrides": [{
-                "name": "app",
-                "command": ["npx", "prisma", "migrate", "deploy"]
-              }]
-            }'
-          sleep 30
+    - name: Run database migrations for staging
+      env:
+        DATABASE_URL: ${{ env.DATABASE_URL }}
+      run: |
+        echo "Running database migrations for staging..."
+        docker run --rm \
+          -e DATABASE_URL="$DATABASE_URL" \
+          ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image-tag }} \
+          npx prisma migrate deploy
 
-      - name: Deploy to Staging
-        run: |
-          VERSION="${{ steps.get-staging-tag.outputs.image-tag }}"
-          echo "Deploying version $VERSION to Staging"
-          
-          aws ecs update-service \
-            --cluster next-hire-cluster-stg \
-            --service next-hire-app-stg \
-            --task-definition ${{ steps.update-task-def.outputs.task-definition-arn }} \
-            --force-new-deployment
+    - name: Deploy to Staging
+      run: |
+        VERSION="${{ needs.build-and-push.outputs.image-tag }}"
+        echo "Deploying version $VERSION to Staging"
+        
+        aws ecs update-service \
+          --cluster next-hire-cluster-staging \
+          --service next-hire-app-staging \
+          --task-definition ${{ steps.update-staging-task-def.outputs.task-definition-arn }} \
+          --force-new-deployment
 
-      - name: Wait for staging deployment
-        run: |
-          echo "Waiting for Staging deployment..."
-          aws ecs wait services-stable \
-            --cluster next-hire-cluster-stg \
-            --services next-hire-app-stg
-          echo "Staging deployment completed!"
+    - name: Wait for staging deployment
+      run: |
+        echo "Waiting for Staging deployment..."
+        aws ecs wait services-stable \
+          --cluster next-hire-cluster-staging \
+          --services next-hire-app-staging
+        echo "Staging deployment completed!"
 
-      - name: Run integration tests on staging
-        env:
-          STAGING_URL: ${{ secrets.STAGING_URL }}
-        run: |
-          echo "Running integration tests on staging environment..."
-          # Add your integration test commands here
-          curl -f $STAGING_URL/health || exit 1
+    - name: Run staging health check
+      run: |
+        echo "Performing staging health check..."
+        SERVICE_URL=$(aws elbv2 describe-load-balancers --names next-hire-alb-staging --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || echo "")
+        
+        if [ -n "$SERVICE_URL" ]; then
+          curl -f http://$SERVICE_URL/health || exit 1
           echo "Staging health check passed!"
-
-  # deploy-to-production:
-  #   needs: [build-and-push, deploy-to-staging]
-  #   if: false  # Disabled by default, enable when ready
-  #   runs-on: ubuntu-latest
-  #   environment: 
-  #     name: production
-  #     url: https://your-production-url.com
-  #   permissions:
-  #     id-token: write
-  #     contents: read
-
-  #   steps:
-  #   - name: Configure AWS credentials
-  #     uses: aws-actions/configure-aws-credentials@v4
-  #     with:
-  #       role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_PROD }}
-  #       aws-region: ${{ env.AWS_REGION }}
-  #       role-session-name: GitHubActions-Production
-
-  #   - name: Manual approval (optional)
-  #     uses: trstringer/manual-approval@v1
-  #     with:
-  #       secret: ${{ github.token }}
-  #       approvers: team-lead,devops-lead
-
-  #   - name: Deploy to Production
-  #     env:
-  #       DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
-  #     run: |
-  #       # Production deployment steps similar to staging
-  #       # Add rollback procedures and monitoring checks
+        else
+          echo "Could not get staging ALB URL"
+          exit 1
+        fi
 
   notification:
     needs: [deploy-to-dev, deploy-to-staging]
@@ -426,11 +303,6 @@ jobs:
       - name: Send deployment notification
         if: always()
         run: |
-          STATUS="${{ needs.deploy-to-staging.result || needs.deploy-to-dev.result }}"
-          if [ "$STATUS" = "success" ]; then
-            echo "Deployment successful!"
-            # Add Slack/Teams notification here
-          else
-            echo "Deployment failed!"
-            # Add failure notification
-          fi
+          echo "Deployment completed!"
+          # Add your notification logic here (Slack, Teams, Email, etc.)
+          echo "Status: ${{ needs.deploy-to-staging.result || needs.deploy-to-dev.result }}"

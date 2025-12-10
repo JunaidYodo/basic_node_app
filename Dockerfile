@@ -5,26 +5,41 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-COPY package*.json ./
+# Install system dependencies (needed for Prisma & bcrypt)
+RUN apk update && apk add --no-cache \
+    libc6-compat \
+    openssl \
+    python3 \
+    make \
+    g++
+
+# Copy package files
+COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-RUN npm ci
+# Install ALL dependencies including devDependencies
+RUN npm ci --include=dev
 
+# SET DUMMY DATABASE_URL for prisma generate
+ENV DATABASE_URL="postgresql://dummy:dummy@dummy:5432/dummy?schema=public"
+
+# Generate Prisma client
 RUN npx prisma generate
 
 # =============================================
-# Stage 2: Builder (with dev deps for build if needed)
+# Stage 2: Production Dependencies
 # =============================================
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/prisma ./prisma
+COPY package.json package-lock.json ./
+RUN npm ci --only=production
+
+COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
+COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma/
 
 COPY . .
-
-RUN npm ci --only=production
 
 # =============================================
 # Stage 3: Production Image
@@ -35,31 +50,25 @@ ARG BUILD_VERSION="1.0.0"
 ARG BUILD_DATE
 ARG COMMIT_SHA
 
-LABEL maintainer="devops-team"
-LABEL version="${BUILD_VERSION}"
-LABEL build-date="${BUILD_DATE}"
-LABEL commit-sha="${COMMIT_SHA}"
-LABEL description="Node.js Application"
-
 ENV NODE_ENV=production
 ENV PORT=3000
 
 WORKDIR /app
 
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+# Install curl for health check
+RUN apk update && apk add --no-cache curl
 
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
-COPY --chown=nodejs:nodejs package*.json ./
-COPY --chown=nodejs:nodejs . .
+# Create required directories as root
+RUN mkdir -p temp_uploads public
 
-USER nodejs
+# Copy files (as root by default)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=deps /app/prisma ./prisma
+COPY --from=builder /app ./
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/health || wget --no-verbose --tries=1 --spider http://localhost:${PORT}/health || exit 1
+    CMD curl -f http://localhost:3000/health || exit 1
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["node", "--experimental-loader=extensionless", "server.js"]

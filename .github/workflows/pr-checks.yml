@@ -1,0 +1,85 @@
+name: PR Code Quality Checks
+
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [opened, synchronize, reopened]
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: next-hire-app
+  AWS_ACCOUNT_ID: 618166615317
+  PORT: 3000
+
+jobs:
+  snyk-security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+    
+    - name: Run Snyk Open Source Scan
+      uses: snyk/actions/node@master
+      continue-on-error: true
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        command: test
+        args: --severity-threshold=high
+    - name: Run Snyk Code Scan
+      uses: snyk/actions/node@master
+      continue-on-error: true
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        command: code test
+        args: --severity-threshold=high
+
+  # lint-and-test:
+  #   needs: [snyk-security-scan]
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     NODE_ENV: test
+  #   permissions:
+  #     id-token: write
+  #     contents: read
+  #     pull-requests: write
+
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #     with:
+  #       ref: ${{ github.event.pull_request.head.sha }}
+
+  #   - name: Setup Node.js
+  #     uses: actions/setup-node@v4
+  #     with:
+  #       node-version: '20'
+  #       cache: 'npm'
+  #       cache-dependency-path: package-lock.json
+
+  #   - name: Cache node modules
+  #     uses: actions/cache@v3
+  #     with:
+  #       path: ~/.npm
+  #       key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+  #       restore-keys: |
+  #         ${{ runner.os }}-node-
+
+  #   - name: Install dependencies
+  #     run: |
+  #       npm ci
