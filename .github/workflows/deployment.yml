@@ -53,13 +53,15 @@ jobs:
         echo "New version: $NEW_VERSION"
         echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create and push Git tag
-        run: |
-          NEW_VERSION="${{ steps.version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
-          git push origin "$NEW_VERSION"
+    - name: Create and push Git tag
+      run: |
+        NEW_VERSION="${{ steps.version.outputs.version }}"
+        echo "Creating Git tag: $NEW_VERSION"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+        git push origin "$NEW_VERSION"
+        echo "Tag $NEW_VERSION created and pushed"
 
   build-and-push:
     needs: determine-version
