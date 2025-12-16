@@ -169,17 +169,36 @@ jobs:
           --output text)
         
         if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
-          echo "Running migrations in existing task: $TASK_ARN"
+          echo "Found running task: $TASK_ARN"
+          
+          # Debug: Show task details to find container name
+          echo "Getting task details..."
+          TASK_DETAILS=$(aws ecs describe-tasks \
+            --cluster next-hire-cluster-dev \
+            --tasks $TASK_ARN \
+            --output json)
+          
+          echo "Task details:"
+          echo $TASK_DETAILS | jq '.tasks[0].containers[] | {name: .name, lastStatus: .lastStatus}'
+          
+          # Get the container name from the task definition
+          CONTAINER_NAME=$(echo $TASK_DETAILS | jq -r '.tasks[0].containers[0].name // "next-hire-app"')
+          echo "Using container name: $CONTAINER_NAME"
+          
+          # Check if ECS Exec is enabled for the task
+          TASK_DEF_ARN=$(echo $TASK_DETAILS | jq -r '.tasks[0].taskDefinitionArn')
+          echo "Task definition ARN: $TASK_DEF_ARN"
           
           # Execute migration command inside the running container
+          echo "Running migrations..."
           aws ecs execute-command \
             --cluster next-hire-cluster-dev \
             --task $TASK_ARN \
-            --container next-hire-app-dev \
+            --container $CONTAINER_NAME \
             --command "npx prisma migrate deploy" \
             --interactive
         else
-          echo "No running tasks found. Migrations will be skipped."
+          echo "No running tasks found. Migrations will run after deployment."
         fi
 
     - name: Deploy to Development
