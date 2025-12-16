@@ -157,6 +157,31 @@ jobs:
         
         echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
 
+    - name: Run migrations from ECS task (Before Deployment)
+      run: |
+        echo "Running migrations before deployment..."
+        
+        # Get a running task before deployment
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster next-hire-cluster-dev \
+          --service next-hire-app-dev \
+          --query 'taskArns[0]' \
+          --output text)
+        
+        if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
+          echo "Running migrations in existing task: $TASK_ARN"
+          
+          # Execute migration command inside the running container
+          aws ecs execute-command \
+            --cluster next-hire-cluster-dev \
+            --task $TASK_ARN \
+            --container next-hire-app-dev \
+            --command "npx prisma migrate deploy" \
+            --interactive
+        else
+          echo "No running tasks found. Migrations will be skipped."
+        fi
+
     - name: Deploy to Development
       run: |
         aws ecs update-service \
@@ -173,6 +198,29 @@ jobs:
           --services next-hire-app-dev
         echo "Deployment completed!"
 
+    - name: Verify migrations after deployment
+      run: |
+        echo "Verifying migrations after deployment..."
+        sleep 30  # Wait for new task to be fully running
+        
+        # Get the new task
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster next-hire-cluster-dev \
+          --service next-hire-app-dev \
+          --query 'taskArns[0]' \
+          --output text)
+        
+        if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
+          echo "Verifying migrations in new task: $TASK_ARN"
+          
+          # Check migration status
+          aws ecs execute-command \
+            --cluster next-hire-cluster-dev \
+            --task $TASK_ARN \
+            --container next-hire-app-dev \
+            --command "npx prisma migrate status" \
+            --interactive
+        fi
 
   deploy-to-staging:
     needs: [build-and-push, deploy-to-dev]
@@ -253,15 +301,30 @@ jobs:
         echo "New task definition registered: $NEW_TASK_INFO"
         echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
 
-    - name: Run database migrations for staging
-      env:
-        DATABASE_URL: ${{ env.DATABASE_URL }}
+    - name: Run migrations from ECS task in staging
       run: |
-        echo "Running database migrations for staging..."
-        docker run --rm \
-          -e DATABASE_URL="$DATABASE_URL" \
-          ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image-tag }} \
-          npx prisma migrate deploy
+        echo "Running migrations for staging..."
+        
+        # Get a running task
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster next-hire-cluster-staging \
+          --service next-hire-app-staging \
+          --query 'taskArns[0]' \
+          --output text)
+        
+        if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
+          echo "Running migrations in existing task: $TASK_ARN"
+          
+          # Execute migration command inside the running container
+          aws ecs execute-command \
+            --cluster next-hire-cluster-staging \
+            --task $TASK_ARN \
+            --container next-hire-app-staging \
+            --command "npx prisma migrate deploy" \
+            --interactive
+        else
+          echo "No running tasks found in staging. Deploying first, then running migrations."
+        fi
 
     - name: Deploy to Staging
       run: |
@@ -281,6 +344,30 @@ jobs:
           --cluster next-hire-cluster-staging \
           --services next-hire-app-staging
         echo "Staging deployment completed!"
+
+    - name: Verify staging migrations after deployment
+      run: |
+        echo "Verifying migrations in staging after deployment..."
+        sleep 30  # Wait for new task to be fully running
+        
+        # Get the new task
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster next-hire-cluster-staging \
+          --service next-hire-app-staging \
+          --query 'taskArns[0]' \
+          --output text)
+        
+        if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
+          echo "Running migrations in new staging task: $TASK_ARN"
+          
+          # Run migrations on the new task (in case no task was running before)
+          aws ecs execute-command \
+            --cluster next-hire-cluster-staging \
+            --task $TASK_ARN \
+            --container next-hire-app-staging \
+            --command "npx prisma migrate deploy" \
+            --interactive
+        fi
 
     - name: Run staging health check
       run: |
