@@ -206,8 +206,8 @@ jobs:
         echo "Running migrations after deployment..."
         
         # Wait for new task to be fully running with ECS Exec enabled
-        echo "Waiting 60 seconds for new task to be ready..."
-        sleep 60
+        echo "Waiting 10 seconds for new task to be ready..."
+        sleep 10
         
         # Get the new task (should have ECS Exec enabled)
         TASK_ARN=$(aws ecs list-tasks \
@@ -220,7 +220,7 @@ jobs:
           echo "Found new task with ECS Exec enabled: $TASK_ARN"
           
           # Wait a bit more to ensure the execute command agent is running
-          sleep 30
+          sleep 10
           
           # Test ECS Exec connection first
           echo "Testing ECS Exec connection..."
