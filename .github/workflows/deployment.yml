@@ -130,27 +130,25 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
         role-session-name: GitHubActions-Dev
 
-    - name: Update task definition with ECS Exec enabled
+    - name: Update task definition (remove enableExecuteCommand)
       id: update-task-def
       run: |
         VERSION="${{ needs.build-and-push.outputs.image-tag }}"
         NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
         
         echo "Updating task definition with image: $NEW_IMAGE"
-        echo "Enabling ECS Execute Command..."
         
         TASK_DEFINITION=$(aws ecs describe-task-definition \
           --task-definition next-hire-app-dev \
           --query 'taskDefinition' \
           --output json)
         
-        # Update image and add enableExecuteCommand at task level
+        # Update image only - NO enableExecuteCommand here
         NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
           --arg IMAGE "$NEW_IMAGE" \
           '
           .containerDefinitions[0].image = $IMAGE |
-          .enableExecuteCommand = true |
-          del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+          del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .registeredAt, .deregisteredAt)
           ')
         
         # Add environment variables if they exist in secrets
@@ -172,26 +170,27 @@ jobs:
             ] + (.containerDefinitions[0].environment // [])')
         fi
         
-        # Write the JSON to a file to avoid shell escaping issues
+        # Write the JSON to a file
         echo "$NEW_TASK_DEF" > new_task_def.json
-        echo "Task definition JSON:"
-        cat new_task_def.json | jq '.'
         
         NEW_TASK_INFO=$(aws ecs register-task-definition \
           --cli-input-json file://new_task_def.json \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         
-        echo "New task definition registered with ECS Exec enabled: $NEW_TASK_INFO"
+        echo "New task definition registered: $NEW_TASK_INFO"
         echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
 
-    - name: Deploy to Development
+    - name: Deploy to Development with ECS Exec enabled
       run: |
-        echo "Deploying new task definition with ECS Exec enabled..."
+        echo "Deploying with ECS Exec enabled..."
+        
+        # Enable execute command on the service
         aws ecs update-service \
           --cluster next-hire-cluster-dev \
           --service next-hire-app-dev \
           --task-definition ${{ steps.update-task-def.outputs.task-definition-arn }} \
+          --enable-execute-command \
           --force-new-deployment
 
     - name: Wait for initial deployment
