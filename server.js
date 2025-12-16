@@ -7,6 +7,8 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import responseTime from 'response-time';
+import pool from './db';
+import prisma from './db/prisma'; 
 
 import { PORT, CORS_ORIGIN } from './config';
 import { logger } from './configs/logger.configs.js';
@@ -127,3 +129,14 @@ app.get('/health', (req, res) => {
 	  memory: process.memoryUsage()
 	});
   });
+
+
+app.get('/prisma-test', async (req, res) => {
+try {
+	const users = await prisma.user.findMany();
+	res.json(users);
+} catch (err) {
+	console.error(err);
+	res.status(500).send('Error querying Prisma');
+}
+});
