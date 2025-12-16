@@ -144,12 +144,12 @@ jobs:
           --query 'taskDefinition' \
           --output json)
         
-        # Update image AND enable execute command
+        # Update image and add enableExecuteCommand at task level
         NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
           --arg IMAGE "$NEW_IMAGE" \
           '
           .containerDefinitions[0].image = $IMAGE |
-          .containerDefinitions[0].enableExecuteCommand = true |
+          .enableExecuteCommand = true |
           del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
           ')
         
@@ -172,8 +172,13 @@ jobs:
             ] + (.containerDefinitions[0].environment // [])')
         fi
         
+        # Write the JSON to a file to avoid shell escaping issues
+        echo "$NEW_TASK_DEF" > new_task_def.json
+        echo "Task definition JSON:"
+        cat new_task_def.json | jq '.'
+        
         NEW_TASK_INFO=$(aws ecs register-task-definition \
-          --cli-input-json "$NEW_TASK_DEF" \
+          --cli-input-json file://new_task_def.json \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         
@@ -202,8 +207,8 @@ jobs:
         echo "Running migrations after deployment..."
         
         # Wait for new task to be fully running with ECS Exec enabled
-        echo "Waiting 30 seconds for new task to be ready..."
-        sleep 30
+        echo "Waiting 60 seconds for new task to be ready..."
+        sleep 60
         
         # Get the new task (should have ECS Exec enabled)
         TASK_ARN=$(aws ecs list-tasks \
@@ -216,16 +221,24 @@ jobs:
           echo "Found new task with ECS Exec enabled: $TASK_ARN"
           
           # Wait a bit more to ensure the execute command agent is running
-          sleep 10
+          sleep 30
           
-          # Verify ECS Exec is working
+          # Test ECS Exec connection first
           echo "Testing ECS Exec connection..."
-          aws ecs execute-command \
-            --cluster next-hire-cluster-dev \
-            --task $TASK_ARN \
-            --container next-hire \
-            --command "echo 'ECS Exec is working!'" \
-            --interactive
+          for i in {1..5}; do
+            if aws ecs execute-command \
+              --cluster next-hire-cluster-dev \
+              --task $TASK_ARN \
+              --container next-hire \
+              --command "echo 'Test $i: ECS Exec is working!'" \
+              --interactive; then
+              echo "ECS Exec connection successful!"
+              break
+            else
+              echo "Attempt $i failed, retrying in 10 seconds..."
+              sleep 10
+            fi
+          done
           
           # Run migrations
           echo "Running database migrations..."
@@ -240,6 +253,27 @@ jobs:
         else
           echo "ERROR: No running tasks found after deployment!"
           exit 1
+        fi
+
+    - name: Verify migrations
+      run: |
+        echo "Verifying migrations..."
+        sleep 10
+        
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster next-hire-cluster-dev \
+          --service next-hire-app-dev \
+          --query 'taskArns[0]' \
+          --output text)
+        
+        if [ -n "$TASK_ARN" ]; then
+          echo "Checking migration status..."
+          aws ecs execute-command \
+            --cluster next-hire-cluster-dev \
+            --task $TASK_ARN \
+            --container next-hire \
+            --command "npx prisma migrate status" \
+            --interactive
         fi
 
     - name: Health check
@@ -310,7 +344,7 @@ jobs:
           --query 'taskDefinition' \
           --output json)
         
-        # Update the image, enable execute command, and environment variables
+        # Update the image, enable execute command at task level, and environment variables
         NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
           --arg IMAGE "$NEW_IMAGE" \
           --arg DATABASE_URL "$DATABASE_URL" \
@@ -318,7 +352,7 @@ jobs:
           --arg PORT "$PORT" \
           '
           .containerDefinitions[0].image = $IMAGE |
-          .containerDefinitions[0].enableExecuteCommand = true |
+          .enableExecuteCommand = true |
           .containerDefinitions[0].environment = [
             {"name": "DATABASE_URL", "value": $DATABASE_URL},
             {"name": "NODE_ENV", "value": $NODE_ENV},
@@ -327,9 +361,12 @@ jobs:
           del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
           ')
         
+        # Write to file to avoid shell issues
+        echo "$NEW_TASK_DEF" > new_staging_task_def.json
+        
         # Register new task definition
         NEW_TASK_INFO=$(aws ecs register-task-definition \
-          --cli-input-json "$NEW_TASK_DEF" \
+          --cli-input-json file://new_staging_task_def.json \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         
@@ -358,7 +395,7 @@ jobs:
     - name: Run staging migrations via ECS Exec
       run: |
         echo "Running migrations for staging..."
-        sleep 30  # Wait for new task to be fully running
+        sleep 60  # Wait for new task to be fully running
         
         # Get the new task
         TASK_ARN=$(aws ecs list-tasks \
@@ -372,12 +409,22 @@ jobs:
           
           # Test ECS Exec connection
           echo "Testing ECS Exec in staging..."
-          aws ecs execute-command \
-            --cluster next-hire-cluster-staging \
-            --task $TASK_ARN \
-            --container next-hire \
-            --command "echo 'Staging ECS Exec is working!'" \
-            --interactive
+          sleep 30
+          
+          for i in {1..5}; do
+            if aws ecs execute-command \
+              --cluster next-hire-cluster-staging \
+              --task $TASK_ARN \
+              --container next-hire \
+              --command "echo 'Test $i: Staging ECS Exec is working!'" \
+              --interactive; then
+              echo "ECS Exec connection successful!"
+              break
+            else
+              echo "Attempt $i failed, retrying in 10 seconds..."
+              sleep 10
+            fi
+          done
           
           # Run migrations
           echo "Running staging database migrations..."
