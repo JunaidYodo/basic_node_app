@@ -68,6 +68,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image-tag: ${{ needs.determine-version.outputs.version }}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
