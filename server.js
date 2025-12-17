@@ -36,7 +36,6 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-app.set('trust proxy', true);
 
 // Note: Stripe webhook needs raw body, so this must come before express.json()
 app.use(
@@ -137,10 +136,19 @@ app.use('/api-docs', (req, res, next) => {
 	customSiteTitle: 'NextHire API Documentation',
   }));
 
-app.get('/api-docs.json', (req, res) => {
-	res.setHeader('Content-Type', 'application/json');
-	res.send(swaggerSpec);
-});
+  app.get('/api-docs.json', (req, res) => {
+	// Import the static spec
+	import('./swagger.config.js').then(module => {
+	  const spec = module.default || module;
+	
+	  spec.servers = [{
+		url: `http://${req.get('host')}/api/v1`,
+		description: 'Current server (HTTP)'
+	  }];
+	  
+	  res.json(spec);
+	});
+  });
 
 // API Routes
 app.use('/api/v1/auth', AuthRoutes);
