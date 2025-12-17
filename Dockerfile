@@ -33,6 +33,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --only=production
+RUN PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x npx prisma generate
 
 # Copy Prisma client from deps stage
 COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
@@ -61,7 +62,6 @@ LABEL org.label-schema.version=$BUILD_VERSION \
 WORKDIR /app
 
 RUN apk update && apk add --no-cache curl openssl libc6-compat
-RUN PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x npx prisma generate
 
 # Create required directories
 RUN mkdir -p temp_uploads public logs
