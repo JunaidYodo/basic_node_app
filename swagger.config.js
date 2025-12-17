@@ -1,19 +1,6 @@
 import swaggerJsdoc from 'swagger-jsdoc';
 import { PORT } from './config.js';
-export function generateSwaggerSpec(req = null) {
-	let serverUrl;
-	
-	if (req) {
-	  // Use current request's protocol and host
-	  const protocol = req.protocol || 'http';
-	  const host = req.get('host') || `localhost:${process.env.PORT || 3000}`;
-	  serverUrl = `${protocol}://${host}/api/v1`;
-	} else {
-	  // Fallback for when no request is available
-	  serverUrl = `http://localhost:${process.env.PORT || 3000}/api/v1`;
-	}
 
-	
 const options = {
 	definition: {
 		openapi: '3.0.0',
@@ -36,7 +23,7 @@ const options = {
 				description: 'Development server',
 			},
 			{
-				url: serverUrl,
+				url: 'http://next-hire-alb-dev-1841187250.us-east-2.elb.amazonaws.com/api/v1',
 				description: 'Production server',
 			}
 		],
