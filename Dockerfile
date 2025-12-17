@@ -82,4 +82,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 EXPOSE 3000
 
 # Startup command - runs migrations then starts the app
-CMD ["sh", "-c", "npm run prisma:deploy && node --experimental-loader=extensionless server.js"]
+CMD ["sh", "-c", "export DATABASE_URL=\"postgresql://${DB_USERNAME}:$(echo ${DB_PASSWORD} | sed 's/\\//\\\\\\//g')@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require\" && npm run prisma:deploy && node --experimental-loader=extensionless server.js"]
