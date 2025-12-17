@@ -54,7 +54,7 @@ app.use(cors({ origin: '*' }));
 app.use('/public', express.static(path.join(path.resolve(), 'temp_uploads')));
 app.use(express.static(path.join(path.resolve(), 'public')));
 
-app.use(helmet());
+// app.use(helmet());
 
 // Health Check & Utility Routes (Define BEFORE API routes)
 app.get('/', (req, res) => {
@@ -151,6 +151,15 @@ app.listen(PORT, () => {
 └─────────────────────────────────────────┘
 	`);
 });
+
+app.get('/test-https', (req, res) => {
+	res.json({
+	  protocol: req.protocol,
+	  secure: req.secure,
+	  headers: req.headers,
+	  originalUrl: req.originalUrl
+	});
+  });
 
 export default app;
 
