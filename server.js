@@ -100,11 +100,21 @@ app.get('/seed', (req, res) => {
 });
 
 // Swagger Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+app.use('/api-docs', (req, res, next) => {
+	// Check if it's an asset request (CSS, JS, PNG)
+	if (req.path.match(/\.(css|js|png|ico)$/) && req.secure) {
+	  const httpUrl = `http://${req.get('host')}${req.originalUrl}`;
+	  return res.redirect(httpUrl);
+	}
+	next();
+  });
+  
+  // Then your existing Swagger setup
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
 	explorer: true,
 	customCss: '.swagger-ui .topbar { display: none }',
 	customSiteTitle: 'NextHire API Documentation',
-}));
+  }));
 
 app.get('/api-docs.json', (req, res) => {
 	res.setHeader('Content-Type', 'application/json');
