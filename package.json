@@ -14,7 +14,7 @@
     "migrate:dev": "dotenv -e .env.development -- npx prisma migrate deploy && npx prisma generate",
     "migrate:production": "dotenv -e .env.production -- npx prisma migrate deploy && npx prisma generate",
     "production": "cross-env NODE_ENV=production node --experimental-loader=extensionless server.js",
-    "start": "npm run migrate:production && npm run production",
+    "start": "npx prisma migrate deploy && npm run production",
     "dev": "cross-env NODE_ENV=development nodemon --experimental-loader=extensionless server.js",
     "start:dev": "npm run migrate:dev && npm run dev",
     "lint": "eslint .",
