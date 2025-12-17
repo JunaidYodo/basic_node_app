@@ -1,79 +1,92 @@
 # =============================================
 # Stage 1: Dependencies & Prisma Client Build
 # =============================================
-FROM node:20-alpine AS deps
+FROM node:20-bullseye-slim AS deps
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apk update && apk add --no-cache \
-    libc6-compat \
+RUN apt-get update && apt-get install -y \
     openssl \
+    ca-certificates \
     python3 \
     make \
-    g++
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files and Prisma schema
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-# Install ALL dependencies including devDependencies
-RUN npm ci --include=dev
+# Install ALL dependencies (including dev for Prisma)
+RUN npm ci
 
-# Generate Prisma client (no DATABASE_URL needed for generate)
+# Generate Prisma client at build time
 RUN npx prisma generate
 
 # =============================================
-# Stage 2: Production Dependencies
+# Stage 2: Production Dependencies & App Build
 # =============================================
-FROM node:20-alpine AS builder
+FROM node:20-bullseye-slim AS builder
 
 WORKDIR /app
 
+# Install system packages
+RUN apt-get update && apt-get install -y \
+    openssl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files
 COPY package.json package-lock.json ./
-RUN npm ci --only=production
+
+# Install only production dependencies
+RUN npm ci --omit=dev
 
 # Copy Prisma client from deps stage
-COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
-COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma/
+COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma
 
+# Copy application source
 COPY . .
 
 # =============================================
-# Stage 3: Production Image
+# Stage 3: Runtime Image (Private ECS Safe)
 # =============================================
-FROM node:20-alpine
+FROM node:20-bullseye-slim
 
 ARG BUILD_VERSION="1.0.0"
 ARG BUILD_DATE
 ARG COMMIT_SHA
 
-# Environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Labels for metadata
 LABEL org.label-schema.version=$BUILD_VERSION \
       org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.vcs-ref=$COMMIT_SHA
 
 WORKDIR /app
 
-# Install curl for health check
-RUN apk update && apk add --no-cache curl
+# Runtime system packages
+RUN apt-get update && apt-get install -y \
+    openssl \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create required directories
 RUN mkdir -p temp_uploads public logs
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001
-USER nextjs
+RUN groupadd -g 1001 nodejs && \
+    useradd -u 1001 -g nodejs -m nextjs
 
-# Copy application files
+# Copy app files
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
-COPY --from=deps --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app ./
+
+USER nextjs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
@@ -81,5 +94,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 EXPOSE 3000
 
-# Startup command - runs migrations then starts the app
-CMD ["sh", "-c", "export DATABASE_URL=\"postgresql://${DB_USERNAME}:$(echo ${DB_PASSWORD} | sed 's/\\//\\\\\\//g')@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require\" && npm run start && node --experimental-loader=extensionless server.js"]
+CMD ["sh", "-c", "export DATABASE_URL=\"postgresql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require\" && npm run migrate:production && npm run start"]
