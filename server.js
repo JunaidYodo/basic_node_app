@@ -36,6 +36,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+app.set('trust proxy', true);
+
 // Note: Stripe webhook needs raw body, so this must come before express.json()
 app.use(
 	'/api/v1/subscription/webhook',
@@ -101,16 +103,35 @@ app.get('/seed', (req, res) => {
 
 // Swagger Documentation
 app.use('/api-docs', (req, res, next) => {
-	// Check if it's an asset request (CSS, JS, PNG)
-	if (req.path.match(/\.(css|js|png|ico)$/) && req.secure) {
-	  const httpUrl = `http://${req.get('host')}${req.originalUrl}`;
-	  return res.redirect(httpUrl);
+	// Debug: log what we're seeing
+	console.log('Swagger request:', {
+	  path: req.path,
+	  protocol: req.protocol,
+	  secure: req.secure,
+	  originalUrl: req.originalUrl,
+	  headers: {
+		'x-forwarded-proto': req.headers['x-forwarded-proto'],
+		host: req.headers['host']
+	  }
+	});
+	
+	// Check if it's an asset request
+	if (req.path.match(/\.(css|js|png|ico)$/)) {
+	  // Determine if we're actually on HTTPS
+	  const isHttps = req.secure || 
+					  req.headers['x-forwarded-proto'] === 'https' ||
+					  req.headers['x-forwarded-proto'] === 'https,http' ||
+					  req.protocol === 'https';
+	  
+	  if (isHttps) {
+		// Redirect HTTPS to HTTP for assets
+		const httpUrl = `http://${req.get('host')}${req.originalUrl}`;
+		console.log('Redirecting asset to HTTP:', httpUrl);
+		return res.redirect(httpUrl);
+	  }
 	}
 	next();
-  });
-  
-  // Then your existing Swagger setup
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  }, swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
 	explorer: true,
 	customCss: '.swagger-ui .topbar { display: none }',
 	customSiteTitle: 'NextHire API Documentation',
