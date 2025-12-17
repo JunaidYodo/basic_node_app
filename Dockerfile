@@ -5,7 +5,7 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-# Install system dependencies (needed for Prisma & bcrypt)
+# Install system dependencies
 RUN apk update && apk add --no-cache \
     libc6-compat \
     openssl \
@@ -13,17 +13,14 @@ RUN apk update && apk add --no-cache \
     make \
     g++
 
-# Copy package files
+# Copy package files and Prisma schema
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
 # Install ALL dependencies including devDependencies
 RUN npm ci --include=dev
 
-# SET DUMMY DATABASE_URL for prisma generate
-ENV DATABASE_URL="postgresql://dummy:dummy@dummy:5432/dummy?schema=public"
-
-# Generate Prisma client
+# Generate Prisma client (no DATABASE_URL needed for generate)
 RUN npx prisma generate
 
 # =============================================
@@ -36,6 +33,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --only=production
 
+# Copy Prisma client from deps stage
 COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
 COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma/
 
@@ -50,25 +48,38 @@ ARG BUILD_VERSION="1.0.0"
 ARG BUILD_DATE
 ARG COMMIT_SHA
 
+# Environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
+
+# Labels for metadata
+LABEL org.label-schema.version=$BUILD_VERSION \
+      org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.vcs-ref=$COMMIT_SHA
 
 WORKDIR /app
 
 # Install curl for health check
 RUN apk update && apk add --no-cache curl
 
-# Create required directories as root
-RUN mkdir -p temp_uploads public
+# Create required directories
+RUN mkdir -p temp_uploads public logs
 
-# Copy files (as root by default)
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=deps /app/prisma ./prisma
-COPY --from=builder /app ./
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nextjs -u 1001
+USER nextjs
 
+# Copy application files
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=deps --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app ./
+
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
 EXPOSE 3000
 
-CMD ["node", "--experimental-loader=extensionless", "server.js"]
+# Startup command - runs migrations then starts the app
+CMD ["sh", "-c", "npm run prisma:deploy && node --experimental-loader=extensionless server.js"]

@@ -1,10 +1,31 @@
 import { PrismaClient } from '@prisma/client';
 
-// Dynamically create DATABASE_URL from ECS secrets
-if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = `postgresql://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
-}
+// Simple function to get DATABASE_URL
+const getDatabaseUrl = (): string => {
+  // Get values from environment (injected by ECS from Secrets Manager)
+  const { DB_USERNAME, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME } = process.env;
+  
+  // Validate
+  if (!DB_USERNAME || !DB_PASSWORD || !DB_HOST || !DB_PORT || !DB_NAME) {
+    throw new Error('Missing database environment variables');
+  }
+  
+  // For AWS RDS, always use SSL in production
+  const ssl = '?sslmode=require';
+  
+  // Encode password for URL safety
+  const encodedPassword = encodeURIComponent(DB_PASSWORD);
+  
+  return `postgresql://${DB_USERNAME}:${encodedPassword}@${DB_HOST}:${DB_PORT}/${DB_NAME}${ssl}`;
+};
 
+// Set for Prisma
+process.env.DATABASE_URL = getDatabaseUrl();
+
+// Create Prisma client
 const prisma = new PrismaClient();
+
+// Log connection (without password)
+console.log('Database connected to:', process.env.DB_HOST);
 
 export default prisma;

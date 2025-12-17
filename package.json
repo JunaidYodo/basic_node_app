@@ -19,7 +19,9 @@
 		"ci-check": "npm run lint && npm run format",
 		"prisma:generate": "prisma generate",
 		"prisma:migrate": "prisma migrate dev",
-		"prisma:deploy": "prisma migrate deploy"
+		"prisma:deploy": "prisma migrate deploy",
+		"docker:start": "npm run prisma:migrate && npm start",
+		"health": "curl -f http://localhost:3000/health || exit 1"
 	},
 	"husky": {
 		"hooks": {

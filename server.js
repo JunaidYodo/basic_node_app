@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import pool from './db';
+import prisma from './db/prisma'; 
 
 import compression from 'compression';
 import cors from 'cors';
