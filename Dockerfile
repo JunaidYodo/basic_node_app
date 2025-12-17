@@ -9,6 +9,7 @@ WORKDIR /app
 RUN apk update && apk add --no-cache \
     libc6-compat \
     openssl \
+    openssl-dev \
     python3 \
     make \
     g++
