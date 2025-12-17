@@ -21,9 +21,10 @@ COPY prisma ./prisma/
 # Install ALL dependencies including devDependencies
 RUN npm ci --include=dev
 
-# 2. NOW copy Prisma schema and generate client
-COPY prisma ./prisma/
-RUN PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x npx prisma generate
+# Generate Prisma Client with binary targets
+# CRITICAL: This downloads and bundles the binaries during build
+
+RUN npx prisma generate
 
 # =============================================
 # Stage 2: Production Dependencies
@@ -38,7 +39,7 @@ RUN apk update && apk add --no-cache openssl libc6-compat
 COPY package.json package-lock.json ./
 RUN npm ci --only=production
 
-# Copy Prisma client from deps stage (CRITICAL)
+# Copy ENTIRE Prisma setup from deps stage (includes binaries)
 COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
 COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma/
 
@@ -53,7 +54,7 @@ ARG BUILD_VERSION="1.0.0"
 ARG BUILD_DATE
 ARG COMMIT_SHA
 
-ENV NODE_ENV=development
+ENV NODE_ENV=production
 ENV PORT=3000
 
 WORKDIR /app
@@ -67,12 +68,20 @@ RUN mkdir -p temp_uploads public logs
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nextjs -u 1001
-USER nextjs
 
-# Copy application files
+# Copy application files with correct ownership
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=deps --chown=nextjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nextjs:nodejs /app ./
+COPY --from=builder --chown=nextjs:nodejs /app/package*.json ./
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
+COPY --from=builder --chown=nextjs:nodejs /app/.env* ./ 
+
+# Switch to non-root user
+USER nextjs
+
+# Disable Prisma telemetry and binary download attempts
+ENV CHECKPOINT_DISABLE=1
+ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
