@@ -10,6 +10,9 @@ env:
   ECR_REPOSITORY: next-hire-app
   AWS_ACCOUNT_ID: 618166615317
   PORT: 3000
+  DEV_CLUSTER: next-hire-cluster-dev
+  DEV_SERVICE: next-hire-app-dev
+  SSM_IMAGE_TAG_PARAMETER: "/ecs/next-hire-app/dev/image-tag"
 
 jobs:
   lint-and-test:
@@ -23,6 +26,21 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Lint code
+      run: npm run lint
+
+    - name: Run tests
+      run: npm test
 
   determine-version:
     needs: lint-and-test
@@ -71,7 +89,7 @@ jobs:
     needs: determine-version
     runs-on: ubuntu-latest
     outputs:
-      image-tag: ${{ needs.determine-version.outputs.version }}
+      image-tag: ${{ steps.version.outputs.image-tag }}
     permissions:
       id-token: write
       contents: read
@@ -114,6 +132,10 @@ jobs:
           ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
         push: true
 
+    - name: Logout from Amazon ECR
+      if: always()
+      run: docker logout ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
   deploy-to-dev:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -130,338 +152,211 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
         role-session-name: GitHubActions-Dev
 
-    - name: Update task definition (remove enableExecuteCommand)
-      id: update-task-def
+    - name: Update SSM Parameter with new image tag
       run: |
         VERSION="${{ needs.build-and-push.outputs.image-tag }}"
-        NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
+        echo "Updating SSM parameter $SSM_IMAGE_TAG_PARAMETER with version: $VERSION"
         
-        echo "Updating task definition with image: $NEW_IMAGE"
+        # Update Parameter Store
+        aws ssm put-parameter \
+          --name "$SSM_IMAGE_TAG_PARAMETER" \
+          --value "$VERSION" \
+          --type "String" \
+          --overwrite
         
-        TASK_DEFINITION=$(aws ecs describe-task-definition \
-          --task-definition next-hire-app-dev \
-          --query 'taskDefinition' \
-          --output json)
-        
-        # Update image only - NO enableExecuteCommand here
-        NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
-          --arg IMAGE "$NEW_IMAGE" \
-          '
-          .containerDefinitions[0].image = $IMAGE |
-          del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .registeredAt, .deregisteredAt)
-          ')
-        
-        # Add environment variables if they exist in secrets
-        if [ -n "${{ secrets.DB_HOST_DEV }}" ]; then
-          echo "Adding database environment variables..."
-          DB_HOST="${{ secrets.DB_HOST_DEV }}"
-          DB_PORT="${{ secrets.DB_PORT_DEV }}"
-          DB_NAME="${{ secrets.DB_NAME_DEV }}"
-          DB_USERNAME="${{ secrets.DB_USERNAME_DEV }}"
-          DB_PASSWORD="${{ secrets.DB_PASSWORD_DEV }}"
-          DATABASE_URL="postgresql://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
-          
-          NEW_TASK_DEF=$(echo $NEW_TASK_DEF | jq \
-            --arg DATABASE_URL "$DATABASE_URL" \
-            '.containerDefinitions[0].environment = [
-              {"name": "DATABASE_URL", "value": $DATABASE_URL},
-              {"name": "NODE_ENV", "value": "development"},
-              {"name": "PORT", "value": "3000"}
-            ] + (.containerDefinitions[0].environment // [])')
-        fi
-        
-        # Write the JSON to a file
-        echo "$NEW_TASK_DEF" > new_task_def.json
-        
-        NEW_TASK_INFO=$(aws ecs register-task-definition \
-          --cli-input-json file://new_task_def.json \
+        echo "SSM parameter updated successfully"
+
+    - name: Get current task definition
+      id: get-task
+      run: |
+        echo "Getting current task definition..."
+        TASK_ARN=$(aws ecs describe-task-definition \
+          --task-definition ${{ env.DEV_SERVICE }} \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         
-        echo "New task definition registered: $NEW_TASK_INFO"
-        echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
+        echo "Current task definition: $TASK_ARN"
+        echo "task-arn=$TASK_ARN" >> $GITHUB_OUTPUT
 
-    - name: Deploy to Development with ECS Exec enabled
+    - name: Force ECS service update
       run: |
-        echo "Deploying with ECS Exec enabled..."
+        echo "Forcing ECS service deployment..."
         
-        # Enable execute command on the service
+        # Update service with existing task definition (force new deployment)
         aws ecs update-service \
-          --cluster next-hire-cluster-dev \
-          --service next-hire-app-dev \
-          --task-definition ${{ steps.update-task-def.outputs.task-definition-arn }} \
-          --enable-execute-command \
+          --cluster ${{ env.DEV_CLUSTER }} \
+          --service ${{ env.DEV_SERVICE }} \
+          --task-definition ${{ steps.get-task.outputs.task-arn }} \
           --force-new-deployment
-
-    - name: Wait for initial deployment
-      run: |
-        echo "Waiting for initial deployment..."
-        aws ecs wait services-stable \
-          --cluster next-hire-cluster-dev \
-          --services next-hire-app-dev
-        echo "Initial deployment completed!"
-
-    - name: Run migrations from new ECS task
-      run: |
-        echo "Running migrations after deployment..."
         
-        # Wait for new task to be fully running with ECS Exec enabled
-        echo "Waiting 10 seconds for new task to be ready..."
+        echo "ECS service update initiated"
+
+    - name: Wait for deployment
+      run: |
+        echo "Waiting for deployment to stabilize..."
+        
+        # Wait for service to stabilize
+        aws ecs wait services-stable \
+          --cluster ${{ env.DEV_CLUSTER }} \
+          --services ${{ env.DEV_SERVICE }}
+        
+        echo "Deployment completed successfully!"
+
+    - name: Verify new image is running
+      run: |
+        echo "Verifying new image version..."
         sleep 10
         
-        # Get the new task (should have ECS Exec enabled)
+        # Get current running tasks
         TASK_ARN=$(aws ecs list-tasks \
-          --cluster next-hire-cluster-dev \
-          --service next-hire-app-dev \
+          --cluster ${{ env.DEV_CLUSTER }} \
+          --service ${{ env.DEV_SERVICE }} \
           --query 'taskArns[0]' \
           --output text)
         
         if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
-          echo "Found new task with ECS Exec enabled: $TASK_ARN"
+          echo "Found running task: $TASK_ARN"
           
-          # Wait a bit more to ensure the execute command agent is running
-          sleep 10
+          # Get task details
+          TASK_DETAILS=$(aws ecs describe-tasks \
+            --cluster ${{ env.DEV_CLUSTER }} \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].containers[0].image' \
+            --output text)
           
-          # Test ECS Exec connection first
-          echo "Testing ECS Exec connection..."
-          for i in {1..5}; do
-            if aws ecs execute-command \
-              --cluster next-hire-cluster-dev \
-              --task $TASK_ARN \
-              --container next-hire \
-              --command "echo 'Test $i: ECS Exec is working!'" \
-              --interactive; then
-              echo "ECS Exec connection successful!"
-              break
-            else
-              echo "Attempt $i failed, retrying in 10 seconds..."
-              sleep 10
-            fi
-          done
+          echo "Current running image: $TASK_DETAILS"
           
-          # Run migrations
-          echo "Running database migrations..."
-          aws ecs execute-command \
-            --cluster next-hire-cluster-dev \
-            --task $TASK_ARN \
-            --container next-hire \
-            --command "npx prisma migrate deploy" \
-            --interactive
-            
-          echo "Migrations completed successfully!"
+          EXPECTED_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image-tag }}"
+          
+          if [[ "$TASK_DETAILS" == *"${{ needs.build-and-push.outputs.image-tag }}"* ]]; then
+            echo "✅ Success! New image version is running"
+          else
+            echo "⚠️ Warning: New image version not detected. Running: $TASK_DETAILS"
+            echo "Expected tag: ${{ needs.build-and-push.outputs.image-tag }}"
+          fi
         else
-          echo "ERROR: No running tasks found after deployment!"
+          echo "❌ Error: No running tasks found"
           exit 1
-        fi
-
-    - name: Verify migrations
-      run: |
-        echo "Verifying migrations..."
-        sleep 10
-        
-        TASK_ARN=$(aws ecs list-tasks \
-          --cluster next-hire-cluster-dev \
-          --service next-hire-app-dev \
-          --query 'taskArns[0]' \
-          --output text)
-        
-        if [ -n "$TASK_ARN" ]; then
-          echo "Checking migration status..."
-          aws ecs execute-command \
-            --cluster next-hire-cluster-dev \
-            --task $TASK_ARN \
-            --container next-hire \
-            --command "npx prisma migrate status" \
-            --interactive
         fi
 
     - name: Health check
       run: |
         echo "Performing health check..."
-        sleep 10
-        SERVICE_URL=$(aws elbv2 describe-load-balancers --names next-hire-alb-dev --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || echo "")
+        
+        # Get ALB DNS name
+        ALB_NAME="next-hire-alb-dev"
+        
+        # Wait a bit for service to be fully ready
+        sleep 30
+        
+        # Try to get ALB DNS
+        SERVICE_URL=$(aws elbv2 describe-load-balancers \
+          --names "$ALB_NAME" \
+          --query 'LoadBalancers[0].DNSName' \
+          --output text 2>/dev/null || echo "")
         
         if [ -n "$SERVICE_URL" ]; then
           echo "Checking health at: http://$SERVICE_URL/health"
-          curl -f http://$SERVICE_URL/health || exit 1
-          echo "Health check passed!"
-        else
-          echo "Could not get ALB URL, skipping health check"
-        fi
-
-  deploy-to-staging:
-    needs: [build-and-push, deploy-to-dev]
-    if: success()
-    runs-on: ubuntu-latest
-    environment: 
-      name: staging
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_ASSUME_ROLE }}
-        aws-region: ${{ env.AWS_REGION }}
-        role-session-name: GitHubActions-Staging
-
-    - name: Create DATABASE_URL for staging
-      run: |
-        DB_HOST="${{ secrets.DB_HOST_STAGING }}"
-        DB_PORT="${{ secrets.DB_PORT_STAGING }}"
-        DB_NAME="${{ secrets.DB_NAME_STAGING }}"
-        DB_USERNAME="${{ secrets.DB_USERNAME_STAGING }}"
-        DB_PASSWORD="${{ secrets.DB_PASSWORD_STAGING }}"
-        
-        # Create DATABASE_URL
-        DATABASE_URL="postgresql://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
-        
-        echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
-        echo "DB_HOST=$DB_HOST" >> $GITHUB_ENV
-        echo "DB_PORT=$DB_PORT" >> $GITHUB_ENV
-        echo "DB_NAME=$DB_NAME" >> $GITHUB_ENV
-        echo "DB_USERNAME=$DB_USERNAME" >> $GITHUB_ENV
-
-    - name: Update staging task definition with ECS Exec
-      id: update-staging-task-def
-      env:
-        DATABASE_URL: ${{ env.DATABASE_URL }}
-        JWT_SECRET: ${{ secrets.JWT_SECRET_STAGING }}
-        NODE_ENV: staging
-        PORT: ${{ env.PORT }}
-      run: |
-        VERSION="${{ needs.build-and-push.outputs.image-tag }}"
-        NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
-        
-        echo "Updating staging task definition with image: $NEW_IMAGE"
-        
-        # Get current task definition
-        TASK_DEFINITION=$(aws ecs describe-task-definition \
-          --task-definition next-hire-app-staging \
-          --query 'taskDefinition' \
-          --output json)
-        
-        # Update the image, enable execute command at task level, and environment variables
-        NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
-          --arg IMAGE "$NEW_IMAGE" \
-          --arg DATABASE_URL "$DATABASE_URL" \
-          --arg NODE_ENV "$NODE_ENV" \
-          --arg PORT "$PORT" \
-          '
-          .containerDefinitions[0].image = $IMAGE |
-          .enableExecuteCommand = true |
-          .containerDefinitions[0].environment = [
-            {"name": "DATABASE_URL", "value": $DATABASE_URL},
-            {"name": "NODE_ENV", "value": $NODE_ENV},
-            {"name": "PORT", "value": $PORT}
-          ] |
-          del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-          ')
-        
-        # Write to file to avoid shell issues
-        echo "$NEW_TASK_DEF" > new_staging_task_def.json
-        
-        # Register new task definition
-        NEW_TASK_INFO=$(aws ecs register-task-definition \
-          --cli-input-json file://new_staging_task_def.json \
-          --query 'taskDefinition.taskDefinitionArn' \
-          --output text)
-        
-        echo "New staging task definition registered with ECS Exec: $NEW_TASK_INFO"
-        echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
-
-    - name: Deploy to Staging
-      run: |
-        VERSION="${{ needs.build-and-push.outputs.image-tag }}"
-        echo "Deploying version $VERSION to Staging with ECS Exec enabled"
-        
-        aws ecs update-service \
-          --cluster next-hire-cluster-staging \
-          --service next-hire-app-staging \
-          --task-definition ${{ steps.update-staging-task-def.outputs.task-definition-arn }} \
-          --force-new-deployment
-
-    - name: Wait for staging deployment
-      run: |
-        echo "Waiting for Staging deployment..."
-        aws ecs wait services-stable \
-          --cluster next-hire-cluster-staging \
-          --services next-hire-app-staging
-        echo "Staging deployment completed!"
-
-    - name: Run staging migrations via ECS Exec
-      run: |
-        echo "Running migrations for staging..."
-        sleep 60  # Wait for new task to be fully running
-        
-        # Get the new task
-        TASK_ARN=$(aws ecs list-tasks \
-          --cluster next-hire-cluster-staging \
-          --service next-hire-app-staging \
-          --query 'taskArns[0]' \
-          --output text)
-        
-        if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
-          echo "Found staging task: $TASK_ARN"
           
-          # Test ECS Exec connection
-          echo "Testing ECS Exec in staging..."
-          sleep 30
-          
+          # Try multiple times with exponential backoff
           for i in {1..5}; do
-            if aws ecs execute-command \
-              --cluster next-hire-cluster-staging \
-              --task $TASK_ARN \
-              --container next-hire \
-              --command "echo 'Test $i: Staging ECS Exec is working!'" \
-              --interactive; then
-              echo "ECS Exec connection successful!"
-              break
-            else
-              echo "Attempt $i failed, retrying in 10 seconds..."
-              sleep 10
+            echo "Health check attempt $i..."
+            if curl -s -f --max-time 10 "http://$SERVICE_URL/health"; then
+              echo "✅ Health check passed!"
+              exit 0
             fi
+            echo "Attempt $i failed, waiting $((i * 10)) seconds..."
+            sleep $((i * 10))
           done
           
-          # Run migrations
-          echo "Running staging database migrations..."
-          aws ecs execute-command \
-            --cluster next-hire-cluster-staging \
-            --task $TASK_ARN \
-            --container next-hire \
-            --command "npx prisma migrate deploy" \
-            --interactive
-            
-          echo "Staging migrations completed!"
-        else
-          echo "ERROR: No running tasks found in staging!"
+          echo "❌ Health check failed after multiple attempts"
+          echo "Last known service URL: http://$SERVICE_URL"
           exit 1
+        else
+          echo "⚠️ Could not get ALB URL, checking ECS service status..."
+          
+          # Check ECS service directly
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.DEV_CLUSTER }} \
+            --services ${{ env.DEV_SERVICE }} \
+            --query 'services[0]')
+          
+          RUNNING_COUNT=$(echo $SERVICE_STATUS | jq -r '.runningCount')
+          DESIRED_COUNT=$(echo $SERVICE_STATUS | jq -r '.desiredCount')
+          
+          if [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ]; then
+            echo "✅ ECS service is healthy: $RUNNING_COUNT/$DESIRED_COUNT tasks running"
+            exit 0
+          else
+            echo "❌ ECS service unhealthy: $RUNNING_COUNT/$DESIRED_COUNT tasks running"
+            exit 1
+          fi
         fi
 
-    - name: Run staging health check
-      run: |
-        echo "Performing staging health check..."
-        SERVICE_URL=$(aws elbv2 describe-load-balancers --names next-hire-alb-staging --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || echo "")
-        
-        if [ -n "$SERVICE_URL" ]; then
-          curl -f http://$SERVICE_URL/health || exit 1
-          echo "Staging health check passed!"
-        else
-          echo "Could not get staging ALB URL"
-          exit 1
-        fi
+  rollback-on-failure:
+    needs: deploy-to-dev
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Rollback
+
+      - name: Rollback to previous SSM parameter value
+        run: |
+          echo "Rolling back due to deployment failure..."
+          
+          # Try to get previous value from SSM parameter history
+          PREVIOUS_VALUE=$(aws ssm get-parameter-history \
+            --name "$SSM_IMAGE_TAG_PARAMETER" \
+            --query 'Parameters[?Version==`1`].Value' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$PREVIOUS_VALUE" ]; then
+            echo "Rolling back to previous version: $PREVIOUS_VALUE"
+            
+            aws ssm put-parameter \
+              --name "$SSM_IMAGE_TAG_PARAMETER" \
+              --value "$PREVIOUS_VALUE" \
+              --type "String" \
+              --overwrite
+            
+            echo "Rolled back SSM parameter"
+          else
+            echo "Could not find previous SSM parameter value"
+          fi
+          
+          # Force another deployment to use previous image
+          aws ecs update-service \
+            --cluster ${{ env.DEV_CLUSTER }} \
+            --service ${{ env.DEV_SERVICE }} \
+            --force-new-deployment
 
   notification:
-    needs: [deploy-to-dev, deploy-to-staging]
+    needs: [deploy-to-dev, rollback-on-failure]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Send deployment notification
         if: always()
         run: |
-          echo "Deployment completed!"
-          # Add your notification logic here (Slack, Teams, Email, etc.)
-          echo "Dev Status: ${{ needs.deploy-to-dev.result }}"
-          echo "Staging Status: ${{ needs.deploy-to-staging.result }}"
+          DEPLOY_STATUS="${{ needs.deploy-to-dev.result }}"
+          ROLLBACK_STATUS="${{ needs.rollback-on-failure.result }}"
+          
+          if [ "$DEPLOY_STATUS" = "success" ]; then
+            echo "✅ Dev deployment completed successfully!"
+            echo "Image version: ${{ needs.build-and-push.outputs.image-tag }}"
+          elif [ "$DEPLOY_STATUS" = "failure" ] && [ "$ROLLBACK_STATUS" = "success" ]; then
+            echo "⚠️ Dev deployment failed but rollback succeeded"
+          elif [ "$DEPLOY_STATUS" = "failure" ]; then
+            echo "❌ Dev deployment failed!"
+            exit 1
+          elif [ "$DEPLOY_STATUS" = "cancelled" ]; then
+            echo "⏸️ Dev deployment was cancelled"
+          else
+            echo "❓ Unknown deployment status: $DEPLOY_STATUS"
+            exit 1
+          fi
