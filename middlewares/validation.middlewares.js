@@ -1,5 +1,3 @@
-import fs from 'fs';
-
 import { ValidationError as YupValidationError } from 'yup';
 
 import { ValidationError } from '../errors';
@@ -28,14 +26,6 @@ export const validate = schema => async (req, res, next) => {
 
 		return next();
 	} catch (err) {
-		if (req.file) {
-			fs.unlinkSync(req.file.path);
-		} else if (req.files) {
-			req.files.forEach(file => {
-				fs.unlinkSync(file.path);
-			});
-		}
-
 		if (!(err instanceof YupValidationError)) return next(err);
 
 		const errors = err.inner.map(e => {

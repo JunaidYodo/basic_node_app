@@ -6,124 +6,151 @@ import compression from 'compression';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
+import morgan from 'morgan';
 import responseTime from 'response-time';
+import swaggerUi from 'swagger-ui-express';
 
-import { PORT, CORS_ORIGIN } from './config';
-import { logger } from './configs/logger.configs.js';
+import { PORT } from './config.js';
 import {
 	errorMiddleware,
-	morganMiddleware,
 	notFound,
-	rateLimiter,
-} from './middlewares';
-import { AuthRoutes, RoleRoutes, UserRoutes } from './routes';
+	// rateLimiter
+} from './middlewares/index.js';
+import {
+	AuthRoutes,
+	RoleRoutes,
+	UserRoutes,
+	SubscriptionRoutes,
+	ResumeRoutes,
+	JobRoutes,
+	ApplicationRoutes,
+	AnalyticsRoutes,
+	OnboardingRoutes,
+	ProfileRoutes
+} from './routes/index.js';
+import runSeeders from './seeders/index.js';
+import swaggerSpec from './swagger.config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Note: Stripe webhook needs raw body, so this must come before express.json()
+app.use(
+	'/api/v1/subscription/webhook',
+	express.raw({ type: 'application/json' }),
+);
 
-// Security & Performance middleware
-app.use(rateLimiter);
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+// app.use(rateLimiter);
 app.use(compression());
-app.use(morganMiddleware);
+app.use(morgan('dev'));
 app.use(responseTime());
-app.use(helmet());
 
-// CORS configuration
-const corsOptions = {
-	origin: CORS_ORIGIN || '*',
-	credentials: true,
-	optionsSuccessStatus: 200,
-};
-app.use(cors(corsOptions));
+app.use(cors({ origin: '*' }));
 
-// Static files
 app.use('/public', express.static(path.join(path.resolve(), 'temp_uploads')));
 app.use(express.static(path.join(path.resolve(), 'public')));
 
-// Health check endpoint
+app.use(helmet());
+
+// Health Check & Utility Routes (Define BEFORE API routes)
+app.get('/', (req, res) => {
+	res.status(200).json({
+		status: 'success',
+		message: 'NextHire API Server is running',
+		version: '1.0.0',
+		timestamp: new Date().toISOString(),
+		endpoints: {
+			health: '/home',
+			seed: '/seed',
+			api: '/api/v1'
+		}
+	});
+});
+
+app.get('/home', (req, res) => {
+	res.status(200).json({
+		status: 'success',
+		message: 'NextHire API Server is running',
+		version: '1.0.0',
+		timestamp: new Date().toISOString(),
+		environment: process.env.NODE_ENV || 'development',
+		port: PORT
+	});
+});
+
 app.get('/health', (req, res) => {
 	res.status(200).json({
-		success: true,
+		status: 'success',
 		message: 'Server is healthy',
-		timestamp: new Date().toISOString(),
 		uptime: process.uptime(),
+		timestamp: new Date().toISOString()
 	});
+});
+
+app.get('/seed', (req, res) => {
+	runSeeders();
+	res.status(200).json({
+		status: 'success',
+		message: 'Seeders run successfully'
+	});
+});
+
+// Swagger Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+	explorer: true,
+	customCss: '.swagger-ui .topbar { display: none }',
+	customSiteTitle: 'NextHire API Documentation',
+}));
+
+app.get('/api-docs.json', (req, res) => {
+	res.setHeader('Content-Type', 'application/json');
+	res.send(swaggerSpec);
 });
 
 // API Routes
 app.use('/api/v1/auth', AuthRoutes);
 app.use('/api/v1/user', UserRoutes);
 app.use('/api/v1/role', RoleRoutes);
+app.use('/api/v1/subscription', SubscriptionRoutes);
+app.use('/api/v1/onboarding', OnboardingRoutes);
+app.use('/api/v1/profile', ProfileRoutes);
+app.use('/api/v1/resume', ResumeRoutes);
+app.use('/api/v1/job', JobRoutes);
+app.use('/api/v1/application', ApplicationRoutes);
+app.use('/api/v1/analytics', AnalyticsRoutes);
 
-app.get('/home', (req, res) => {
-	res
-		.status(200)
-		.json({ success: true, message: `Server is running at port ${PORT}` });
-});
 
-// 404 handler
-app.use('*', notFound);
-
-// Error handling middleware
+// Error handling
+app.use(notFound);
 app.use(errorMiddleware);
 
-// Ensure temp_uploads folder exists
-if (!fs.existsSync('./temp_uploads')) {
-	fs.mkdirSync('./temp_uploads', { recursive: true });
-	logger.info('temp_uploads folder created!');
-}
-
-// Start server
-const server = app.listen(PORT || 3000, () => {
-	logger.info(`Server is listening at port ${PORT}`);
-	logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+app.listen(PORT, () => {
+	console.log(`
+┌─────────────────────────────────────────┐
+│  🚀 NextHire MVP Server Started!       │
+├─────────────────────────────────────────┤
+│  Environment: ${process.env.NODE_ENV || 'development'}
+│  Port: ${PORT}
+│  Health: http://localhost:${PORT}/home
+│  Seed: http://localhost:${PORT}/seed
+│  📖 API Docs: http://localhost:${PORT}/api-docs
+├─────────────────────────────────────────┤
+│  📚 Documentation:                      │
+│     - README.md                         │
+│     - SETUP.md                          │
+│     - FEATURES.md                       │
+│  🧪 Testing:                            │
+│     - Postman collection available      │
+│     - Swagger UI available              │
+├─────────────────────────────────────────┤
+│  Status: ✅ Ready for requests!         │
+└─────────────────────────────────────────┘
+	`);
 });
 
-// Graceful shutdown handler
-const shutdown = signal => {
-	logger.info(`Received ${signal}, shutting down gracefully...`);
-	server.close(() => {
-		logger.info('Server closed. Exiting process.');
-		process.exit(0);
-	});
+export default app;
 
-	// Forced exit after timeout
-	setTimeout(() => {
-		logger.error(
-			'Could not close connections in time, forcefully shutting down',
-		);
-		process.exit(1);
-	}, 10000);
-};
-
-// Handle shutdown signals
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-// Catch unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-	logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-	shutdown('unhandledRejection');
-});
-
-// Catch uncaught exceptions
-process.on('uncaughtException', error => {
-	logger.error('Uncaught Exception thrown:', error);
-	process.exit(1);
-});
-
-
-app.get('/health', (req, res) => {
-	res.status(200).json({
-	  status: 'OK',
-	  timestamp: new Date().toISOString(),
-	  uptime: process.uptime(),
-	  memory: process.memoryUsage()
-	});
-  });

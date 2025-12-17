@@ -1,13 +1,10 @@
+import { PrismaClient } from '@prisma/client';
 import HttpStatus from 'http-status-codes';
 
 import { ROLE_NOT_FOUND } from '../constants';
 import { AppError } from '../errors';
 
-// In-memory role storage (replace with your database)
-const roles = [
-	{ id: 1, name: 'Admin', description: 'Administrator', deleted: false },
-	{ id: 2, name: 'User', description: 'Regular User', deleted: false },
-];
+const prisma = new PrismaClient();
 
 export class RoleService {
 	constructor(req) {
@@ -15,54 +12,50 @@ export class RoleService {
 		this.body = req.body;
 	}
 
+	/* eslint-disable-next-line class-methods-use-this */
 	async getAllRoles() {
 		const { query } = this.req;
 
+		/* eslint-disable-next-line prefer-const */
 		let { page, limit, sort, ...search } = query;
 
 		page = parseInt(page, 10) || 1;
-		limit = parseInt(limit, 10) || 100;
+		limit = parseInt(limit, 10) || 100000;
 
-		let filteredRoles = roles.filter(r => !r.deleted);
+		const options = {
+			where: {
+				deleted: false,
+			},
+		};
 
-		// Apply search filters
-		if (search && Object.keys(search).length > 0) {
-			filteredRoles = filteredRoles.filter(role => {
-				return Object.keys(search).every(key => {
-					const searchValue = search[key];
-					const roleValue = role[key];
-
-					if (
-						!Number.isNaN(searchValue) &&
-						!Number.isNaN(parseFloat(searchValue))
-					) {
-						return roleValue === searchValue;
-					}
-					return roleValue && roleValue.toString().includes(searchValue);
-				});
-			});
+		if (search) {
+			options.where.AND = Object.keys(search).map(key => ({
+				[key]: { contains: search[key] },
+			}));
 		}
-
-		// Apply sorting
 		if (sort) {
 			const [field, direction] = sort.split(':');
-			filteredRoles.sort((a, b) => {
-				if (direction === 'asc') {
-					return a[field] > b[field] ? 1 : -1;
-				}
-				return a[field] < b[field] ? 1 : -1;
-			});
+			options.orderBy = [
+				{
+					[field]: direction,
+				},
+			];
 		}
 
-		const totalCount = filteredRoles.length;
+		const totalCount = await prisma.roles.count(options);
+
 		const totalPages = Math.ceil(totalCount / limit);
 
-		// Pagination
-		const start = (page - 1) * limit;
-		const paginatedRoles = filteredRoles.slice(start, start + limit);
+		options.skip = (page - 1) * limit;
+		options.take = limit;
+
+		const allRecords = await prisma.roles.findMany(options);
+
+		if (!allRecords || !Array.isArray(allRecords) || allRecords.length === 0)
+			throw new AppError(ROLE_NOT_FOUND, HttpStatus.NOT_FOUND, allRecords);
 
 		return {
-			records: paginatedRoles,
+			records: allRecords,
 			totalRecords: totalCount,
 			totalPages,
 			query,
@@ -71,54 +64,73 @@ export class RoleService {
 
 	async getRole() {
 		const { id } = this.req.params;
-		const role = roles.find(r => r.id === parseInt(id, 10) && !r.deleted);
-
-		if (!role) throw new AppError(ROLE_NOT_FOUND, HttpStatus.NOT_FOUND);
-
-		return role;
+		const record = await prisma.roles.findUnique({
+			where: {
+				deleted: false,
+				id: parseInt(id, 10),
+			},
+		});
+		if (!record || !record.id)
+			throw new AppError(ROLE_NOT_FOUND, HttpStatus.NOT_FOUND);
+		return record;
 	}
 
 	async createRole() {
 		const { body } = this.req;
 
-		body.id = roles.length + 1;
-		body.created_at = new Date();
-		body.updated_at = new Date();
-		body.deleted = false;
+		const record = await prisma.roles.create({
+			data: {
+				...body,
+			},
+		});
 
-		roles.push(body);
-
-		return body;
+		return { record };
 	}
 
 	async updateRole() {
 		const { id } = this.req.params;
 		const { body } = this.req;
 
-		const roleIndex = roles.findIndex(
-			r => r.id === parseInt(id, 10) && !r.deleted,
-		);
+		const updateRecord = await prisma.roles.update({
+			where: {
+				deleted: false,
+				id: parseInt(id, 10),
+			},
+			data: body,
+		});
 
-		if (roleIndex === -1)
-			throw new AppError(ROLE_NOT_FOUND, HttpStatus.NOT_FOUND);
-
-		roles[roleIndex] = { ...roles[roleIndex], ...body, updated_at: new Date() };
-
-		return roles[roleIndex];
+		return updateRecord;
 	}
 
 	async deleteRole() {
 		const { id } = this.req.params;
 
-		const roleIndex = roles.findIndex(
-			r => r.id === parseInt(id, 10) && !r.deleted,
-		);
+		await prisma.roles.update({
+			where: {
+				deleted: false,
+				id: parseInt(id, 10),
+			},
+			data: {
+				deleted: true,
+			},
+		});
 
-		if (roleIndex === -1)
-			throw new AppError(ROLE_NOT_FOUND, HttpStatus.NOT_FOUND);
+		return null;
+	}
 
-		roles[roleIndex].deleted = true;
-		roles[roleIndex].updated_at = new Date();
+	async deleteManyRole() {
+		const { ids } = this.req.body;
+
+		await prisma.roles.updateMany({
+			where: {
+				id: {
+					in: ids,
+				},
+			},
+			data: {
+				deleted: true,
+			},
+		});
 
 		return null;
 	}

@@ -1,3 +1,4 @@
+import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import HttpStatus from 'http-status-codes';
 
@@ -5,12 +6,12 @@ import {
 	INVALID_CREDENTIALS,
 	USER_NOT_FOUND,
 	ACCOUNT_STATUS,
+	NOT_ALLOWED_TO_LOGIN,
 } from '../constants';
 import { AppError } from '../errors';
 import { createAccessToken, createOtpToken, sendEmail } from '../utils';
 
-// In-memory user storage (replace with your database)
-const users = [];
+const prisma = new PrismaClient();
 
 export class AuthService {
 	constructor(req) {
@@ -18,18 +19,33 @@ export class AuthService {
 	}
 
 	async login() {
-		const { email, password } = this.req.body;
+		const { email, password, role } = this.req.body;
 
-		const user = users.find(
-			u => u.email === email && u.status === ACCOUNT_STATUS.ACTIVE,
-		);
+		const user = await prisma.users.findFirst({
+			where: {
+				deleted: false,
+				email,
+				status: ACCOUNT_STATUS.ACTIVE,
+			},
+		});
 
-		if (!user) throw new AppError(USER_NOT_FOUND, HttpStatus.NOT_FOUND);
+		if (!user || !user.id)
+			throw new AppError(USER_NOT_FOUND, HttpStatus.NOT_FOUND);
 
 		const isPasswordValid = await bcrypt.compare(password, user.password);
 
 		if (!isPasswordValid)
 			throw new AppError(INVALID_CREDENTIALS, HttpStatus.BAD_REQUEST);
+
+		if (role && role !== user.role)
+			throw new AppError(NOT_ALLOWED_TO_LOGIN, HttpStatus.BAD_REQUEST);
+
+		await prisma.auth_log.create({
+			data: {
+				user_id: user.id,
+				type: 'login',
+			},
+		});
 
 		const updateRecord = this.publicProfile(user);
 
@@ -43,17 +59,25 @@ export class AuthService {
 		const { body } = this.req;
 		const { password } = body;
 
+		
 		body.password = await bcrypt.hash(password, 12);
+		// const birthDate = body.birth_date;
+		// body.birth_date = new Date(`${birthDate}T00:00:00.000Z`);
 		body.status = ACCOUNT_STATUS.ACTIVE;
-		body.id = users.length + 1;
-		body.created_at = new Date();
-		body.updated_at = new Date();
 
 		if (this.req.user && this.req.user.id) body.created_by = this.req.user.id;
 
-		users.push(body);
+		const user = await prisma.users.create({ data: body });
+		const updateRecord = this.publicProfile(user);
+		// const updateRecord = await this.createOTP(user.id);
 
-		return this.publicProfile(body);
+		// const data = {
+		// 	subject: 'Welocme to Trusty Feed',
+		// 	name: updateRecord.name,
+		// };
+		// notification(updateRecord, 'mail', data, 'welcome');
+
+		return this.publicProfile(updateRecord);
 	}
 
 	async getLoggedInUser() {
@@ -62,53 +86,105 @@ export class AuthService {
 	}
 
 	async OtpVerify() {
+		const { type } = this.req;
 		const { id } = this.req.params;
-		const user = users.find(u => u.id === parseInt(id, 10));
+		let updateData;
+		let rememberToken;
+		let updateRecord;
 
-		if (!user) throw new AppError(USER_NOT_FOUND, HttpStatus.NOT_FOUND);
+		if (type === 'reset') {
+			rememberToken = createOtpToken({ userId: id, type });
+			updateData = { remember_token: rememberToken };
+		} else {
+			updateData = { status: ACCOUNT_STATUS.ACTIVE, remember_token: null };
+		}
 
-		user.status = ACCOUNT_STATUS.ACTIVE;
-		user.remember_token = null;
+		updateRecord = await prisma.users.update({
+			where: { id: parseInt(id, 10) },
+			data: updateData,
+		});
+		updateRecord = this.publicProfile(updateRecord);
 
-		return {
-			accessToken: createAccessToken({ id: user.id }),
-			user: this.publicProfile(user),
-		};
+		if (type === 'reset' && rememberToken) {
+			updateRecord.resetToken = rememberToken;
+		}
+
+		return updateRecord;
 	}
 
 	async ResendOTP() {
 		const { id } = this.req.params;
-		const user = users.find(u => u.id === parseInt(id, 10));
+		const { query } = this.req;
+		const type = query?.type && query.type === 'reset' ? 'reset' : 'verify';
 
-		if (!user) throw new AppError(USER_NOT_FOUND, HttpStatus.NOT_FOUND);
+		const updateRecord = await this.createOTP(id, type);
 
-		// Generate and send OTP (implement your logic)
-		return null;
+		return this.publicProfile(updateRecord);
+	}
+
+	// eslint-disable-next-line class-methods-use-this
+	async createOTP(userID, type = 'verify') {
+		const OTP = Math.floor(1000 + Math.random() * 9000);
+
+		const rememberToken = createOtpToken({ userId: userID, OTP, type });
+		const updateRecord = await prisma.users.update({
+			where: {
+				id: parseInt(userID, 10),
+			},
+			data: {
+				remember_token: rememberToken,
+			},
+		});
+
+		const mailOptions = {
+			to: updateRecord.email,
+			subject: 'OTP',
+			text: 'Your One Time Password',
+			html: `<p>Your one time password is ${OTP}.</p>`,
+		};
+
+		sendEmail(mailOptions);
+
+		updateRecord.OTP = OTP;
+
+		return updateRecord;
 	}
 
 	async ForgotPassword() {
 		const { email } = this.req.body;
-		const user = users.find(u => u.email === email);
 
-		if (!user) throw new AppError(USER_NOT_FOUND, HttpStatus.NOT_FOUND);
+		const record = await prisma.users.findFirst({
+			where: {
+				deleted: false,
+				email,
+			},
+		});
 
-		// Generate and send OTP (implement your logic)
-		return null;
+		const updateRecord = await this.createOTP(record.id, 'reset');
+
+		return this.publicProfile(updateRecord);
 	}
 
 	async ResetPassword() {
 		const { id } = this.req.params;
 		const { password } = this.req.body;
-		const user = users.find(u => u.id === parseInt(id, 10));
 
-		if (!user) throw new AppError(USER_NOT_FOUND, HttpStatus.NOT_FOUND);
+		const passwordHash = await bcrypt.hash(password, 12);
 
-		user.password = await bcrypt.hash(password, 12);
-		user.remember_token = null;
+		const updateRecord = await prisma.users.update({
+			where: {
+				id: parseInt(id, 10),
+			},
+			data: {
+				password: passwordHash,
+				remember_token: null,
+			},
+		});
 
-		return null;
+		return this.publicProfile(updateRecord);
 	}
 
+	/* eslint-disable-next-line class-methods-use-this */
 	publicProfile(user) {
 		const record = { ...user };
 		if (!record || !record.id)

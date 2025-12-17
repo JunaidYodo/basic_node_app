@@ -1,3 +1,4 @@
+import { PrismaClient } from '@prisma/client';
 import HttpStatus from 'http-status-codes';
 
 import {
@@ -10,13 +11,7 @@ import {
 import { AppError } from '../errors';
 import { verifyAccessToken, verifyOtpToken } from '../utils';
 
-// Mock user for demonstration (in real app, this would come from database)
-const mockUser = {
-	id: 1,
-	name: 'Demo User',
-	email: 'demo@example.com',
-	role_id: 1,
-};
+const prisma = new PrismaClient();
 
 export const isAuth = async (req, res, next) => {
 	try {
@@ -27,10 +22,15 @@ export const isAuth = async (req, res, next) => {
 
 		if (!decoded || !decoded.id)
 			throw new AppError(INVALID_ACCESS_TOKEN, HttpStatus.UNAUTHORIZED);
-
-		// In a real app, fetch user from database using decoded.id
-		// For now, using mock user
-		req.user = { ...mockUser, id: decoded.id };
+		const user = await prisma.users.findUnique({
+			where: {
+				deleted: false,
+				id: decoded.id,
+			},
+		});
+		if (!user || !user.id)
+			throw new AppError(UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
+		req.user = user;
 		next();
 	} catch (error) {
 		next(error);
@@ -46,9 +46,16 @@ export const resetCheck = async (req, res, next) => {
 
 		if (!decoded || !decoded.userId)
 			throw new AppError(INVALID_ACCESS_TOKEN, HttpStatus.UNAUTHORIZED);
-
-		// In a real app, fetch user from database and verify remember_token
-		req.user = { ...mockUser, id: decoded.userId };
+		const user = await prisma.users.findUnique({
+			where: {
+				deleted: false,
+				id: decoded.userId,
+				remember_token: token,
+			},
+		});
+		if (!user || !user.id)
+			throw new AppError(UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
+		req.user = user;
 		next();
 	} catch (error) {
 		next(error);
@@ -63,9 +70,15 @@ export const checkAuth = async (req, res, next) => {
 
 			if (!decoded || !decoded.id)
 				throw new AppError(INVALID_ACCESS_TOKEN, HttpStatus.UNAUTHORIZED);
-
-			// In a real app, fetch user from database
-			req.user = { ...mockUser, id: decoded.id };
+			const user = await prisma.users.findUnique({
+				where: {
+					deleted: false,
+					id: decoded.id,
+				},
+			});
+			if (!user || !user.id)
+				throw new AppError(UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
+			req.user = user;
 		}
 		next();
 	} catch (error) {
@@ -77,11 +90,28 @@ export const varifyOTP = async (req, res, next) => {
 	try {
 		const { otp } = req.body;
 		const { id } = req.params;
+		const user = await prisma.users.findUnique({
+			where: {
+				deleted: false,
+				id: parseInt(id, 10),
+			},
+		});
 
-		// In a real app, fetch user from database and verify OTP
-		// For now, accepting any OTP for demonstration
-		req.user = { ...mockUser, id: parseInt(id, 10) };
-		req.type = 'verify';
+		if (!user || !user.id || !user.remember_token)
+			throw new AppError(USER_NOT_FOUND, HttpStatus.UNAUTHORIZED);
+
+		const decoded = await verifyOtpToken(user.remember_token);
+
+		if (
+			!decoded ||
+			!decoded.userId ||
+			!decoded.OTP ||
+			parseInt(decoded.OTP, 10) !== parseInt(otp, 10)
+		)
+			throw new AppError(OTP_NOT_VERIFIED, HttpStatus.UNAUTHORIZED);
+
+		req.type = decoded.type ? decoded.type : 'verify';
+		req.user = user;
 		next();
 	} catch (error) {
 		next(error);

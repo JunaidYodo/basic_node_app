@@ -1,6 +1,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { PrismaClient } from '@prisma/client';
 import ejs from 'ejs';
 
 import { sendEmail } from './email.utils';
@@ -15,6 +16,8 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const prisma = new PrismaClient();
 
 async function sendEmailNotification(user, data, template) {
 	const templatePath = path.join(__dirname, '../templates', `${template}.ejs`);

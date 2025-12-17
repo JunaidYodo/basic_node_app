@@ -1,6 +1,6 @@
-export * from './error.middlewares';
-export * from './auth.middlewares';
-export * from './rateLimiter.middlewares';
-export * from './validation.middlewares';
-export * from './multer.middlewares';
-export * from './morgan.middlewares';
+export * from './error.middlewares.js';
+export * from './auth.middlewares.js';
+export * from './rateLimiter.middlewares.js';
+export * from './validation.middlewares.js';
+export * from './multer.middlewares.js';
+

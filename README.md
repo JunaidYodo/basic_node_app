@@ -1,482 +1,518 @@
-# Node Base App - Enterprise Backend Boilerplate
+# NextHire MVP - Backend API
 
-A production-ready, database-agnostic Node.js backend boilerplate with authentication, role-based access control, and best practices built-in. **No database required to start** - uses in-memory storage for demonstration, ready for your database of choice.
+NextHire is an AI-powered SaaS web application that helps job seekers land jobs faster by automating and personalizing the entire job application process.
 
 ## 🚀 Features
 
-- **Authentication & Authorization**
+### Authentication & User Management
+- ✅ Secure JWT-based authentication
+- ✅ Role-based access control
+- ✅ Email verification with OTP
+- ✅ Password reset functionality
+- ✅ Session management
 
-  - JWT-based authentication (Access & OTP tokens)
-  - Role-based access control (RBAC)
-  - Password reset with OTP verification
-  - Secure password hashing with bcrypt
+### Subscription & Billing (Stripe Integration)
+- ✅ Three-tier pricing: Free, Standard ($29/mo), Premium ($79/mo)
+- ✅ Stripe Checkout for seamless payments
+- ✅ Real-time webhook handling for subscription events
+- ✅ Billing portal for subscription management
+- ✅ Payment history tracking
+- ✅ Usage limits per plan (applications and AI generations)
+- ✅ 7-day free trial for paid plans
 
-- **Database Agnostic**
+### Resume & Profile Management
+- ✅ Resume upload (PDF/DOCX) with AI parsing
+- ✅ Automatic profile extraction from resumes
+- ✅ S3 storage for resume files
+- ✅ Multiple resume versions
+- ✅ Profile completeness tracking
+- ✅ Experience and education management
 
-  - In-memory storage for instant setup
-  - No database required to start
-  - Easy to integrate any database (Prisma, Mongoose, Sequelize, etc.)
-  - Service layer ready for your ORM of choice
+### Job Import & Management
+- ✅ Multi-platform job scraping (Greenhouse, Workday, Lever, LinkedIn, Indeed)
+- ✅ Manual job entry
+- ✅ Job filtering and search
+- ✅ Job status tracking
+- ✅ AI match scoring
 
-- **Security**
+### AI Personalization Engine
+- ✅ OpenAI GPT-4 integration
+- ✅ AI-powered resume generation tailored to each job
+- ✅ Custom cover letter generation
+- ✅ Resume parsing and structuring
+- ✅ AI usage tracking and token counting
+- ✅ Variant versioning for A/B testing
 
-  - Helmet.js for HTTP headers
-  - Rate limiting
-  - CORS protection
-  - Input validation & sanitization
-  - Request size limits
-
-- **Developer Experience**
-
-  - ES6+ with ESM modules
-  - Hot reload with Nodemon
-  - ESLint + Prettier
-  - Husky pre-commit hooks
-  - Environment-based configuration
-
-- **Logging & Monitoring**
-
-  - Winston logger with daily rotation
-  - Separate log levels
-  - Exception & rejection handlers
-  - Request/Response logging with Morgan
-
-- **API Features**
-  - RESTful API structure
-  - Pagination, filtering, and sorting
-  - File upload support (Multer)
-  - Email notifications (Nodemailer)
-  - Centralized error handling
-  - Health check endpoint
+### Application Tracking & Analytics
+- ✅ Complete application lifecycle tracking (Draft → Submitted → Interview → Offer)
+- ✅ Application status updates with event logging
+- ✅ Funnel analytics (conversion rates)
+- ✅ Real-time statistics dashboard
+- ✅ Performance metrics tracking
 
 ## 📋 Prerequisites
 
 - Node.js >= 18.0.0
-- npm or yarn
-- **No database required!** (uses in-memory storage)
+- MySQL database
+- AWS S3 account
+- Stripe account
+- OpenAI API key
 
 ## 🛠️ Installation
 
-1. **Clone the repository**
-
-   ```bash
-   git clone <repository-url>
-   cd node-base-app
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment variables**
-
-   Copy the example environment file:
-
-   ```bash
-   cp .env.example .env.development
-   ```
-
-   Update `.env.development` with your configuration:
-
-   ```env
-   # ================================
-   # SERVER CONFIGURATION
-   # ================================
-   NODE_ENV=development
-   PORT=3000
-
-   # ================================
-   # JWT & AUTHENTICATION
-   # ================================
-   # Generate secure random strings using:
-   # node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-
-   ACCESS_TOKEN_SECRET=your-super-secret-access-token-key-change-this
-   ACCESS_TOKEN_EXPIRY=7d
-
-   OTP_TOKEN_SECRET=your-super-secret-otp-token-key-change-this
-   OTP_TOKEN_EXPIRY=15m
-
-   # ================================
-   # RATE LIMITING
-   # ================================
-   RATE_LIMIT_WINDOW=15
-   RATE_LIMIT_MAX=100
-
-   # ================================
-   # EMAIL CONFIGURATION (SMTP) - Optional
-   # ================================
-   SMTP_HOST=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USER=your-email@gmail.com
-   SMTP_PASS=your-app-password
-
-   FROM_NAME=Your App Name
-   FROM_EMAIL=noreply@yourapp.com
-
-   # ================================
-   # APPLICATION EMAILS
-   # ================================
-   ADMIN_EMAIL=admin@yourapp.com
-   SUPPORT_EMAIL=support@yourapp.com
-
-   # ================================
-   # APPLICATION URLS
-   # ================================
-   LIVE_URL=http://localhost:3000
-
-   # ================================
-   # CORS CONFIGURATION
-   # ================================
-   # Comma-separated list of allowed origins
-   CORS_ORIGIN=http://localhost:3000,http://localhost:5173
-   ```
-
-   > **Note:** No database configuration needed! The app uses in-memory storage by default.
-
-4. **Start the development server**
-
-   ```bash
-   npm run dev
-   ```
-
-   **That's it!** The server will start at `http://localhost:3000` with in-memory storage.
-
-## 💾 Data Storage
-
-This boilerplate uses **in-memory storage** by default:
-
-- ✅ **No database setup required**
-- ✅ **Perfect for development and testing**
-- ✅ **Data persists while server is running**
-- ⚠️ **Data is reset when server restarts**
-
-### Adding Your Own Database
-
-When you're ready to connect a database:
-
-1. **Install your preferred database package:**
-
-   ```bash
-   # Prisma (PostgreSQL, MySQL, SQLite, SQL Server)
-   npm install @prisma/client prisma
-
-   # Mongoose (MongoDB)
-   npm install mongoose
-
-   # Sequelize (PostgreSQL, MySQL, MariaDB, SQLite, MSSQL)
-   npm install sequelize mysql2
-   ```
-
-2. **Update the service files** (`services/*.js`):
-   Replace the in-memory arrays with database calls while keeping the same structure.
-
-3. **Add environment variables** for database connection in `.env.development`
-
-See `CONTRIBUTING.md` for detailed instructions on integrating databases.
-
-## 📁 Project Structure
-
-```
-node-base-app/
-├── config.js                 # Environment configuration
-├── server.js                 # Application entry point
-├── configs/                  # Configuration files
-│   ├── logger.configs.js     # Winston logger setup
-│   ├── multer.configs.js     # File upload config
-│   └── index.js
-├── constants/                # Application constants
-│   ├── auth.constants.js
-│   ├── error.constants.js
-│   ├── role.constants.js
-│   └── index.js
-├── controllers/              # Request handlers
-│   ├── auth.controllers.js
-│   ├── user.controllers.js
-│   ├── role.controllers.js
-│   └── index.js
-├── errors/                   # Custom error classes
-│   ├── app.errors.js
-│   ├── validation.errors.js
-│   └── index.js
-├── middlewares/              # Express middlewares
-│   ├── auth.middlewares.js
-│   ├── error.middlewares.js
-│   ├── validation.middlewares.js
-│   ├── rateLimiter.middlewares.js
-│   └── index.js
-├── routes/                   # API routes
-│   ├── auth.routes.js
-│   ├── user.routes.js
-│   ├── role.routes.js
-│   └── index.js
-├── services/                 # Business logic (in-memory storage)
-│   ├── auth.services.js
-│   ├── user.services.js
-│   ├── role.services.js
-│   └── index.js
-├── utils/                    # Utility functions
-│   ├── token.utils.js
-│   ├── email.utils.js
-│   ├── response.utils.js
-│   ├── string.utils.js
-│   └── index.js
-├── validations/              # Request validation schemas
-│   ├── auth.validations.js
-│   ├── user.validations.js
-│   └── index.js
-├── logs/                     # Application logs
-├── temp_uploads/             # Temporary file uploads
-└── package.json
-```
-
-## 🔑 API Endpoints
-
-### Health Check
-
-- `GET /health` - Server health status
-
-### Authentication
-
-- `POST /api/v1/auth/register` - Register new user
-- `POST /api/v1/auth/login` - User login
-- `POST /api/v1/auth/verify/:id` - Verify OTP
-- `GET /api/v1/auth/resendOTP/:id` - Resend OTP
-- `POST /api/v1/auth/forgot` - Forgot password
-- `POST /api/v1/auth/reset/:id` - Reset password
-- `GET /api/v1/auth/me` - Get logged-in user
-
-### Users (Protected)
-
-- `GET /api/v1/user` - Get all users (paginated)
-- `GET /api/v1/user/:id` - Get user by ID
-- `POST /api/v1/user` - Create new user
-- `PUT /api/v1/user/:id` - Update user
-- `PUT /api/v1/user` - Update multiple users
-- `DELETE /api/v1/user/:id` - Soft delete user
-- `DELETE /api/v1/user` - Soft delete multiple users
-
-### Roles (Protected)
-
-- `GET /api/v1/role` - Get all roles
-- `GET /api/v1/role/:id` - Get role by ID
-- `POST /api/v1/role` - Create new role
-- `PUT /api/v1/role/:id` - Update role
-- `DELETE /api/v1/role/:id` - Soft delete role
-
-## 🔧 Available Scripts
-
+1. **Clone the repository:**
 ```bash
-# Development
-npm run dev              # Start dev server with hot reload
-
-# Production
-npm run production       # Start production server
-npm start               # Start production server
-
-# Setup
-npm run setup           # Interactive setup wizard
-
-# Code Quality
-npm run lint            # Run ESLint
-npm run prettier        # Format code with Prettier
-npm run format          # Check code formatting
-npm run ci-check        # Run lint + format check
+git clone <repository-url>
+cd next-hire
 ```
 
-## 🔐 Security Best Practices
-
-1. **Environment Variables**: Never commit `.env` files. Use `.env.example` as a template.
-
-2. **JWT Secrets**: Generate strong, random secrets:
-
-   ```bash
-   node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-   ```
-
-3. **Database**: When you add a database, use connection pooling in production and secure your credentials.
-
-4. **In-Memory Data**: Remember that in-memory storage is reset on server restart. Add a database for production.
-
-5. **CORS**: Specify allowed origins instead of using `*` in production.
-
-6. **Rate Limiting**: Adjust rate limits based on your application needs.
-
-7. **File Uploads**: Implement file size limits and type validation.
-
-## 📧 Email Configuration
-
-### Gmail SMTP Setup
-
-1. Enable 2-factor authentication in your Google account
-2. Generate an App Password: https://myaccount.google.com/apppasswords
-3. Use the app password in `SMTP_PASS`
-
-### Other SMTP Providers
-
-Update the SMTP configuration for your provider:
-
-- **SendGrid**: `smtp.sendgrid.net:587`
-- **Mailgun**: `smtp.mailgun.org:587`
-- **AWS SES**: `email-smtp.region.amazonaws.com:587`
-
-## 🗄️ Database Integration (Optional)
-
-By default, this app uses **in-memory storage** (JavaScript arrays). When you're ready to add a database:
-
-### Option 1: Prisma (PostgreSQL, MySQL, SQLite)
-
+2. **Install dependencies:**
 ```bash
-# Install Prisma
-npm install @prisma/client prisma
+npm install
+```
 
-# Initialize Prisma
-npx prisma init
+3. **Configure environment variables:**
 
-# Update prisma/schema.prisma with your models
-# Run migration
-npx prisma migrate dev --name init
+Create `.env.development` file:
+```env
+# Server
+NODE_ENV=development
+PORT=3000
 
-# Update services to use Prisma
-# Example: services/user.services.js
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+# Database
+DATABASE_URL=mysql://username:password@localhost:3306/next_hire_local
 
-async getAllUsers() {
-  return await prisma.users.findMany();
+# JWT Secrets
+ACCESS_TOKEN_SECRET=your-access-token-secret
+ACCESS_TOKEN_EXPIRY=7d
+OTP_TOKEN_SECRET=your-otp-token-secret
+OTP_TOKEN_EXPIRY=10m
+
+# Email (SMTP)
+SMTP_HOST=your-smtp-host
+SMTP_PORT=587
+SMTP_PASS=your-smtp-password
+FROM_EMAIL=noreply@nexthire.com
+FROM_NAME=NextHire
+ADMIN_EMAIL=admin@nexthire.com
+SUPPORT_EMAIL=support@nexthire.com
+
+# Frontend URL
+LIVE_URL=http://localhost:3000
+
+# Stripe
+STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key
+STRIPE_PUBLISHABLE_KEY=pk_test_your_stripe_publishable_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+STRIPE_FREE_PRICE_ID=price_free
+STRIPE_STANDARD_PRICE_ID=price_standard_monthly
+STRIPE_PREMIUM_PRICE_ID=price_premium_monthly
+
+# OpenAI
+OPENAI_API_KEY=sk-your-openai-api-key
+OPENAI_MODEL=gpt-4-turbo-preview
+
+# AWS S3
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_REGION=us-east-1
+AWS_S3_BUCKET=nexthire-resumes
+
+# ATS Integration (Optional)
+GREENHOUSE_API_KEY=your_greenhouse_api_key
+WORKDAY_API_KEY=your_workday_api_key
+LEVER_API_KEY=your_lever_api_key
+
+# Encryption (Generate a random 32-character key)
+ENCRYPTION_KEY=your-32-character-encryption-key
+
+# Rate Limiting
+RATE_LIMIT_WINDOW=15
+RATE_LIMIT_MAX=100
+```
+
+4. **Run database migrations:**
+```bash
+npm run migrate:dev
+```
+
+5. **Seed the database:**
+```bash
+npm run dev
+# Then visit: http://localhost:3000/seed
+```
+
+## 🚀 Running the Application
+
+### Development
+```bash
+npm run dev
+```
+
+### Production
+```bash
+npm start
+```
+
+## 📚 API Documentation
+
+### Base URL
+```
+http://localhost:3000/api/v1
+```
+
+### Authentication Endpoints
+
+#### Register
+```http
+POST /auth/register
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "SecurePass123!",
+  "role_id": 1
 }
 ```
 
-### Option 2: Mongoose (MongoDB)
+#### Login
+```http
+POST /auth/login
+Content-Type: application/json
+
+{
+  "email": "john@example.com",
+  "password": "SecurePass123!"
+}
+```
+
+#### Get Current User
+```http
+GET /auth/me
+Authorization: Bearer <token>
+```
+
+### Subscription Endpoints
+
+#### Create Checkout Session
+```http
+POST /subscription/checkout
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "planName": "standard"
+}
+```
+
+#### Get Subscription Details
+```http
+GET /subscription/details
+Authorization: Bearer <token>
+```
+
+#### Get Billing Portal
+```http
+POST /subscription/portal
+Authorization: Bearer <token>
+```
+
+#### Get Payment History
+```http
+GET /subscription/payment-history
+Authorization: Bearer <token>
+```
+
+#### Cancel Subscription
+```http
+POST /subscription/cancel
+Authorization: Bearer <token>
+```
+
+### Resume Endpoints
+
+#### Upload Resume
+```http
+POST /resume/upload
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+resume: <file>
+```
+
+#### Get All Resumes
+```http
+GET /resume/list
+Authorization: Bearer <token>
+```
+
+#### Get Resume by ID
+```http
+GET /resume/:id
+Authorization: Bearer <token>
+```
+
+#### Delete Resume
+```http
+DELETE /resume/:id
+Authorization: Bearer <token>
+```
+
+#### Set Master Resume
+```http
+PUT /resume/:id/set-master
+Authorization: Bearer <token>
+```
+
+#### Get Profile
+```http
+GET /resume/profile/me
+Authorization: Bearer <token>
+```
+
+#### Update Profile
+```http
+PUT /resume/profile/me
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "headline": "Senior Software Engineer",
+  "summary": "Experienced developer...",
+  "skills": ["JavaScript", "React", "Node.js"],
+  "linkedin_url": "https://linkedin.com/in/johndoe"
+}
+```
+
+### Job Endpoints
+
+#### Import Job from URL
+```http
+POST /job/import
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "url": "https://boards.greenhouse.io/company/jobs/123456"
+}
+```
+
+#### Create Manual Job
+```http
+POST /job/manual
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "company": "Google",
+  "title": "Software Engineer",
+  "description": "Job description...",
+  "location": "Mountain View, CA",
+  "workMode": "hybrid",
+  "salary": "$150k - $200k"
+}
+```
+
+#### Get All Jobs
+```http
+GET /job/list?status=active&source=greenhouse
+Authorization: Bearer <token>
+```
+
+#### Get Job by ID
+```http
+GET /job/:id
+Authorization: Bearer <token>
+```
+
+#### Update Job
+```http
+PUT /job/:id
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "status": "closed"
+}
+```
+
+#### Delete Job
+```http
+DELETE /job/:id
+Authorization: Bearer <token>
+```
+
+### Application Endpoints
+
+#### Generate AI Content
+```http
+POST /application/generate
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "jobId": 1
+}
+```
+
+#### Create Application
+```http
+POST /application/create
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "jobId": 1,
+  "coverLetter": "Generated cover letter...",
+  "submissionMethod": "api"
+}
+```
+
+#### Submit Application
+```http
+POST /application/:id/submit
+Authorization: Bearer <token>
+```
+
+#### Get All Applications
+```http
+GET /application/list?status=submitted
+Authorization: Bearer <token>
+```
+
+#### Get Application Statistics
+```http
+GET /application/statistics
+Authorization: Bearer <token>
+```
+
+#### Update Application Status
+```http
+PUT /application/:id/status
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "status": "interview",
+  "eventData": {
+    "interviewDate": "2025-11-15T10:00:00Z",
+    "interviewType": "phone screen"
+  }
+}
+```
+
+## 🔒 Stripe Webhook Setup
+
+1. **Install Stripe CLI:**
+```bash
+stripe login
+```
+
+2. **Forward webhooks to local:**
+```bash
+stripe listen --forward-to localhost:3000/api/v1/subscription/webhook
+```
+
+3. **Get webhook secret:**
+Copy the webhook secret from the Stripe CLI output and add it to `.env.development`:
+```env
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+4. **Test webhook:**
+```bash
+stripe trigger payment_intent.succeeded
+```
+
+## 📊 Database Schema
+
+The application uses MySQL with Prisma ORM. Key tables:
+
+- **users** - User accounts with subscription info
+- **subscriptions** - Subscription history
+- **payment_history** - Payment records
+- **user_profiles** - User profile data
+- **experiences** - Work experience
+- **educations** - Education history
+- **resumes** - Resume files and parsed data
+- **jobs** - Imported jobs
+- **applications** - Job applications
+- **application_events** - Application status timeline
+- **ai_logs** - AI generation logs
+- **ai_variants** - AI-generated content versions
+- **analytics** - User metrics and analytics
+
+## 🔐 Security Features
+
+- AES-256 encryption for sensitive data
+- JWT-based authentication
+- Rate limiting
+- CORS protection
+- Helmet.js security headers
+- Input validation with Yup
+- SQL injection prevention with Prisma
+- XSS protection
+
+## 📈 Plan Limits
+
+### Free Plan
+- 5 job applications/month
+- 10 AI generations/month
+- Basic features
+
+### Standard Plan - $29/month
+- 50 job applications/month
+- 100 AI generations/month
+- AI cover letters
+- ATS integration (Greenhouse)
+- Application analytics
+
+### Premium Plan - $79/month
+- Unlimited applications
+- Unlimited AI generations
+- All ATS integrations
+- Advanced analytics
+- Priority support
+
+## 🧪 Testing
 
 ```bash
-# Install Mongoose
-npm install mongoose
+# Run tests
+npm test
 
-# Connect in server.js
-import mongoose from 'mongoose';
-await mongoose.connect(process.env.MONGODB_URI);
+# Run linter
+npm run lint
 
-# Create models and update services
+# Format code
+npm run prettier
 ```
 
-### Option 3: Sequelize (SQL Databases)
+## 📝 License
 
-```bash
-# Install Sequelize
-npm install sequelize mysql2
+Proprietary - All rights reserved
 
-# Set up connection and models
-# Update services to use Sequelize
-```
+## 👥 Team
 
-See `CONTRIBUTING.md` for detailed integration guides.
-
-## 🚀 Deployment
-
-### Production Environment
-
-1. **Add a database** - In-memory storage is not suitable for production
-2. Create `.env.production` with production values
-3. Set `NODE_ENV=production`
-4. Use strong secrets and secure database credentials
-5. Configure proper CORS origins
-6. Set up SSL/TLS certificates
-7. Use process managers like PM2:
-
-```bash
-npm install -g pm2
-pm2 start server.js --name "node-base-app"
-pm2 save
-pm2 startup
-```
-
-### Docker Deployment
-
-Create a `Dockerfile`:
-
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]
-```
-
-**Note:** Add database connection and setup steps when you integrate a database.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 Code Standards
-
-- Use ESLint and Prettier for code formatting
-- Follow Airbnb JavaScript style guide
-- Write meaningful commit messages
-- Add JSDoc comments for complex functions
-- Keep functions small and focused
-
-## 📄 License
-
-ISC License - feel free to use this boilerplate for your projects!
+- Backend Lead: [Your Name]
+- AI Integration: [Team Member]
+- DevOps: [Team Member]
 
 ## 🆘 Support
 
-For issues and questions:
+For support, email support@nexthire.com or create an issue in the repository.
 
-- Create an issue in the repository
-- Email: support@yourapp.com
+## 🗺️ Roadmap
 
-## ⚡ Quick Start Example
-
-```bash
-# Install and run
-npm install
-npm run dev
-
-# Server starts at http://localhost:3000
-
-# Test the health endpoint
-curl http://localhost:3000/health
-
-# Register a user
-curl -X POST http://localhost:3000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "John Doe",
-    "email": "john@example.com",
-    "password": "password123",
-    "number": "1234567890",
-    "role_id": 2
-  }'
-```
-
-## 🎯 Roadmap
-
-- [ ] Add unit and integration tests
-- [ ] Add Swagger/OpenAPI documentation
-- [ ] Add Redis caching layer
-- [ ] Add WebSocket support
-- [ ] Add GraphQL API option
-- [ ] Add Docker compose setup
-- [ ] Add CI/CD pipeline examples
-- [ ] Add monitoring and APM integration
-
-## 📚 Additional Documentation
-
-- **[QUICKSTART_DATABASE_FREE.md](./QUICKSTART_DATABASE_FREE.md)** - Detailed quick start guide
-- **[DATABASE_REMOVAL_COMPLETE.md](./DATABASE_REMOVAL_COMPLETE.md)** - Migration details and architecture
-- **[CONTRIBUTING.md](./CONTRIBUTING.md)** - Contribution guidelines and database integration
+- [ ] Additional ATS integrations (Taleo, SmartRecruiters)
+- [ ] Interview preparation module
+- [ ] Advanced analytics dashboard
+- [ ] Mobile application
+- [ ] Chrome extension for one-click apply
+- [ ] Team collaboration features
+- [ ] White-label solutions
 
 ---
 
-**Built with ❤️ for developers who want to start fast and scale easily.**
+Built with ❤️ by the NextHire Team
+
