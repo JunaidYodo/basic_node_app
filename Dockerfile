@@ -72,9 +72,7 @@ RUN addgroup -g 1001 -S nodejs && \
 # Copy application files with correct ownership
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=deps --chown=nextjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nextjs:nodejs /app/package*.json ./
-COPY --from=builder --chown=nextjs:nodejs /app/src ./src
-COPY --from=builder --chown=nextjs:nodejs /app/.env* ./ 
+COPY --from=builder --chown=nextjs:nodejs /app ./
 
 # Switch to non-root user
 USER nextjs
