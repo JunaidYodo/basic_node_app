@@ -130,93 +130,48 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
         role-session-name: GitHubActions-Dev
 
-    - name: Update SSM Parameter with new image tag
+    - name: Update task definition with new image
+      id: update-task-def
       run: |
         VERSION="${{ needs.build-and-push.outputs.image-tag }}"
-        echo "Updating SSM parameter $SSM_IMAGE_TAG_PARAMETER with version: $VERSION"
+        NEW_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$VERSION"
         
-        # Update Parameter Store
-        aws ssm put-parameter \
-          --name "$SSM_IMAGE_TAG_PARAMETER" \
-          --value "$VERSION" \
-          --type "String" \
-          --overwrite
+        echo "Updating task definition with image: $NEW_IMAGE"
         
-        echo "SSM parameter updated successfully"
-
-    - name: Get current task definition
-      id: get-task
-      run: |
-        echo "Getting current task definition..."
-        TASK_ARN=$(aws ecs describe-task-definition \
-          --task-definition ${{ env.DEV_SERVICE }} \
+        TASK_DEFINITION=$(aws ecs describe-task-definition \
+          --task-definition next-hire-app-dev \
+          --query 'taskDefinition' \
+          --output json)
+        
+        NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
+          --arg IMAGE "$NEW_IMAGE" \
+          '
+          .containerDefinitions[0].image = $IMAGE |
+          del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+          ')
+        
+        NEW_TASK_INFO=$(aws ecs register-task-definition \
+          --cli-input-json "$NEW_TASK_DEF" \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         
-        echo "Current task definition: $TASK_ARN"
-        echo "task-arn=$TASK_ARN" >> $GITHUB_OUTPUT
+        echo "task-definition-arn=$NEW_TASK_INFO" >> $GITHUB_OUTPUT
 
-    - name: Force ECS service update
+    - name: Deploy to Development
       run: |
-        echo "Forcing ECS service deployment..."
-        
-        # Update service with existing task definition (force new deployment)
         aws ecs update-service \
-          --cluster ${{ env.DEV_CLUSTER }} \
-          --service ${{ env.DEV_SERVICE }} \
-          --task-definition ${{ steps.get-task.outputs.task-arn }} \
+          --cluster next-hire-cluster-dev \
+          --service next-hire-app-dev \
+          --task-definition ${{ steps.update-task-def.outputs.task-definition-arn }} \
           --force-new-deployment
-        
-        echo "ECS service update initiated"
 
     - name: Wait for deployment
       run: |
-        echo "Waiting for deployment to stabilize..."
-        
-        # Wait for service to stabilize
+        echo "Waiting for deployment..."
         aws ecs wait services-stable \
-          --cluster ${{ env.DEV_CLUSTER }} \
-          --services ${{ env.DEV_SERVICE }}
-        
-        echo "Deployment completed successfully!"
-
-    - name: Verify new image is running
-      run: |
-        echo "Verifying new image version..."
-        sleep 10
-        
-        # Get current running tasks
-        TASK_ARN=$(aws ecs list-tasks \
-          --cluster ${{ env.DEV_CLUSTER }} \
-          --service ${{ env.DEV_SERVICE }} \
-          --query 'taskArns[0]' \
-          --output text)
-        
-        if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
-          echo "Found running task: $TASK_ARN"
-          
-          # Get task details
-          TASK_DETAILS=$(aws ecs describe-tasks \
-            --cluster ${{ env.DEV_CLUSTER }} \
-            --tasks $TASK_ARN \
-            --query 'tasks[0].containers[0].image' \
-            --output text)
-          
-          echo "Current running image: $TASK_DETAILS"
-          
-          EXPECTED_IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image-tag }}"
-          
-          if [[ "$TASK_DETAILS" == *"${{ needs.build-and-push.outputs.image-tag }}"* ]]; then
-            echo "✅ Success! New image version is running"
-          else
-            echo "⚠️ Warning: New image version not detected. Running: $TASK_DETAILS"
-            echo "Expected tag: ${{ needs.build-and-push.outputs.image-tag }}"
-          fi
-        else
-          echo "❌ Error: No running tasks found"
-          exit 1
-        fi
-
+          --cluster next-hire-cluster-dev \
+          --services next-hire-app-dev
+        echo "Deployment completed!"
 
 
   deploy-to-staging:
