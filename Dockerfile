@@ -21,8 +21,8 @@ COPY prisma ./prisma/
 # Install ALL dependencies including devDependencies
 RUN npm ci --include=dev
 
-# Generate Prisma client (no DATABASE_URL needed for generate)
-RUN npx prisma generate
+# Generate Prisma client with specific binary target
+RUN PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x npx prisma generate
 
 # =============================================
 # Stage 2: Production Dependencies
@@ -31,11 +31,13 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Install OpenSSL for any native module builds
+RUN apk update && apk add --no-cache openssl libc6-compat
+
 COPY package.json package-lock.json ./
 RUN npm ci --only=production
-RUN PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x npx prisma generate
 
-# Copy Prisma client from deps stage
+# Copy Prisma client from deps stage (CRITICAL)
 COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma/
 COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma/
 
@@ -50,17 +52,12 @@ ARG BUILD_VERSION="1.0.0"
 ARG BUILD_DATE
 ARG COMMIT_SHA
 
-# Environment variables
 ENV NODE_ENV=development
 ENV PORT=3000
 
-# Labels for metadata
-LABEL org.label-schema.version=$BUILD_VERSION \
-      org.label-schema.build-date=$BUILD_DATE \
-      org.label-schema.vcs-ref=$COMMIT_SHA
-
 WORKDIR /app
 
+# Install runtime dependencies
 RUN apk update && apk add --no-cache curl openssl libc6-compat
 
 # Create required directories
@@ -76,11 +73,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=deps --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app ./
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
 EXPOSE 3000
 
-# Startup command - runs migrations then starts the app
-CMD ["sh", "-c", "export DATABASE_URL=\"postgresql://${DB_USERNAME}:$(echo ${DB_PASSWORD} | sed 's/\\//\\\\\\//g')@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require\" && npm run migrate:dev && npm run dev && node --experimental-loader=extensionless server.js"]
+# Startup command
+CMD ["sh", "-c", "export DATABASE_URL=\"postgresql://${DB_USERNAME}:$(echo ${DB_PASSWORD} | sed 's/\\//\\\\\\//g')@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require\" && npm run migrate:dev && npm run dev"]
