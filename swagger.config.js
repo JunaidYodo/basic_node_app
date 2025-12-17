@@ -26,6 +26,9 @@ const options = {
 				url: 'https://api.nexthire.com/api/v1',
 				description: 'Production server',
 			},
+			{
+				url: "http://next-hire-alb-dev-1841187250.us-east-2.elb.amazonaws.com/"
+			}
 		],
 		components: {
 			securitySchemes: {
