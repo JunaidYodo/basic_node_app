@@ -21,7 +21,8 @@ COPY prisma ./prisma/
 # Install ALL dependencies including devDependencies
 RUN npm ci --include=dev
 
-# Generate Prisma client with specific binary target
+# 2. NOW copy Prisma schema and generate client
+COPY prisma ./prisma/
 RUN PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x npx prisma generate
 
 # =============================================
