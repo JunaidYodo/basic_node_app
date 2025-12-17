@@ -60,8 +60,8 @@ LABEL org.label-schema.version=$BUILD_VERSION \
 
 WORKDIR /app
 
-# Install curl for health check
-RUN apk update && apk add --no-cache curl
+RUN apk update && apk add --no-cache curl openssl libc6-compat
+
 
 # Create required directories
 RUN mkdir -p temp_uploads public logs
